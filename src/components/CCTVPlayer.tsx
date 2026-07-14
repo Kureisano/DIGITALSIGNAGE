@@ -186,10 +186,14 @@ export default function CCTVPlayer({ camera, simulatedTime }: CCTVPlayerProps) {
         <div className={`absolute inset-0 pointer-events-none mix-blend-color ${overlayColor}`} />
 
         {/* CRT Scanline Overlay */}
-        <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px] opacity-25" />
+        {camera.colorTheme !== 'normal' && (
+          <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px] opacity-25" />
+        )}
 
         {/* Static noise scan line moving down */}
-        <div className="absolute left-0 right-0 h-16 bg-white/5 opacity-10 pointer-events-none animate-scanline" />
+        {camera.colorTheme !== 'normal' && (
+          <div className="absolute left-0 right-0 h-16 bg-white/5 opacity-10 pointer-events-none animate-scanline" />
+        )}
 
         {/* CCTV HUD Details overlay */}
         <div className="absolute inset-0 p-3 flex flex-col justify-between pointer-events-none z-10 font-mono text-[9px] tracking-wider text-white">
@@ -291,6 +295,10 @@ export default function CCTVPlayer({ camera, simulatedTime }: CCTVPlayerProps) {
         primaryColor = '#f59e0b'; // amber-500
         bgColor = '#451a03'; // dark amber
         accentColor = '#fbbf24';
+      } else if (camera.colorTheme === 'normal') {
+        primaryColor = '#38bdf8'; // sleek light blue
+        bgColor = '#020617'; // very sleek deep blue-gray slate-950
+        accentColor = '#f43f5e'; // vivid rose accent for tracking
       }
 
       // Draw background
@@ -413,29 +421,31 @@ export default function CCTVPlayer({ camera, simulatedTime }: CCTVPlayerProps) {
       ctx.stroke();
 
       // 5. Scanlines & Grain Noise
-      ctx.globalAlpha = 0.08 + (camera.noiseLevel / 1000);
-      ctx.fillStyle = '#ffffff';
-      for (let i = 0; i < height; i += 3) {
-        if (Math.random() < 0.95) {
-          ctx.fillRect(0, i, width, 1.2);
+      if (camera.colorTheme !== 'normal') {
+        ctx.globalAlpha = 0.08 + (camera.noiseLevel / 1000);
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < height; i += 3) {
+          if (Math.random() < 0.95) {
+            ctx.fillRect(0, i, width, 1.2);
+          }
         }
-      }
 
-      // Moving static interference bar
-      const staticBarY = (frameCount * 1.5) % (height * 1.5) - (height * 0.25);
-      if (staticBarY >= 0 && staticBarY < height) {
-        ctx.fillStyle = primaryColor;
-        ctx.globalAlpha = 0.06;
-        ctx.fillRect(0, staticBarY, width, height * 0.12);
-      }
+        // Moving static interference bar
+        const staticBarY = (frameCount * 1.5) % (height * 1.5) - (height * 0.25);
+        if (staticBarY >= 0 && staticBarY < height) {
+          ctx.fillStyle = primaryColor;
+          ctx.globalAlpha = 0.06;
+          ctx.fillRect(0, staticBarY, width, height * 0.12);
+        }
 
-      // Render pixel grain
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = 0.05 + (camera.noiseLevel / 200);
-      for (let i = 0; i < 80; i++) {
-        const gx = Math.random() * width;
-        const gy = Math.random() * height;
-        ctx.fillRect(gx, gy, 1.5, 1.5);
+        // Render pixel grain
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.05 + (camera.noiseLevel / 200);
+        for (let i = 0; i < 80; i++) {
+          const gx = Math.random() * width;
+          const gy = Math.random() * height;
+          ctx.fillRect(gx, gy, 1.5, 1.5);
+        }
       }
 
       // 6. Camera Info texts

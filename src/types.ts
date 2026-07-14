@@ -31,7 +31,7 @@ export interface CCTVCamera {
   noiseLevel: number; // 0-100
   panSpeed: number; // 0-10 (simulated panning drift)
   hasMotion: boolean;
-  colorTheme: 'monochrome' | 'emerald' | 'amber' | 'nightvision';
+  colorTheme: 'monochrome' | 'emerald' | 'amber' | 'nightvision' | 'normal';
   rtspUrl?: string;
 }
 

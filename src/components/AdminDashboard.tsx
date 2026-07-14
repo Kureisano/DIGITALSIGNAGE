@@ -1920,6 +1920,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                           onChange={(e) => setCCTVForm({ ...cctvForm, colorTheme: e.target.value as any })}
                           className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
                         >
+                          <option value="normal">Normal (Warna Asli / Clean HD)</option>
                           <option value="monochrome">Monochrome (Modern / Grey)</option>
                           <option value="emerald">Emerald Green (Malam / Night Vision)</option>
                           <option value="nightvision">Night Vision Green</option>
@@ -2000,6 +2001,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                               <div className="flex items-center space-x-2">
                                 <p className="text-xs font-display font-extrabold text-white">{cam.name}</p>
                                 <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded uppercase ${
+                                  cam.colorTheme === 'normal' ? 'bg-sky-950/40 text-sky-400 border border-sky-900/30' :
                                   cam.colorTheme === 'monochrome' ? 'bg-slate-950/40 text-slate-300 border border-slate-800/30' :
                                   cam.colorTheme === 'emerald' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/30' :
                                   cam.colorTheme === 'nightvision' ? 'bg-green-950/40 text-green-400 border border-green-900/30' :
