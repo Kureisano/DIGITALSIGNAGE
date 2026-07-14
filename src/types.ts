@@ -40,6 +40,10 @@ export interface PromoSchedule {
   startTime: string; // "HH:MM"
   endTime: string; // "HH:MM"
   daysOfWeek: number[]; // [0, 1, 2, 3, 4, 5, 6] (0 = Sunday, etc.)
+  scheduleType?: 'time_range' | 'duration_timer';
+  durationSeconds?: number; // Total duration of the timer in seconds (e.g., 300 for 5 minutes)
+  startTimestamp?: number; // Milliseconds timestamp of when the promo timer was activated
+  endTimestamp?: number; // Milliseconds timestamp of when the promo timer expires
 }
 
 export interface Promotion {

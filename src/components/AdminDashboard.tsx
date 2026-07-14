@@ -241,6 +241,15 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
   const [previewOrientation, setPreviewOrientation] = useState<DisplayOrientation>('landscape');
   const [timelineHour, setTimelineHour] = useState<number>(12);
   const [timelineMin, setTimelineMin] = useState<number>(0);
+  const [adminTicker, setAdminTicker] = useState<number>(0);
+
+  // 1-second timer to update countdown display live on the admin list
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAdminTicker((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Form states for adding promotions
   const [showPromoForm, setShowPromoForm] = useState(false);
@@ -253,6 +262,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
     imageUrl: PRESET_IMAGES[0].url,
     theme: 'elegant_gold',
     schedule: {
+      scheduleType: 'time_range',
       allDay: false,
       startTime: '08:00',
       endTime: '12:00',
@@ -317,10 +327,38 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
     let updatedPromos: Promotion[] = [];
 
     if (editingPromoId) {
-      updatedPromos = promotions.map((p) =>
-        p.id === editingPromoId ? ({ ...p, ...promoForm } as Promotion) : p
-      );
+      updatedPromos = promotions.map((p) => {
+        if (p.id === editingPromoId) {
+          const merged = { ...p, ...promoForm } as Promotion;
+          // Set scheduleType if missing
+          if (!merged.schedule.scheduleType) {
+            merged.schedule.scheduleType = 'time_range';
+          }
+          // If it is a duration_timer and is active, initialize the timer if not already running
+          if (merged.schedule.scheduleType === 'duration_timer' && merged.isActive) {
+            if (!merged.schedule.endTimestamp) {
+              const durSec = merged.schedule.durationSeconds || 300;
+              merged.schedule.startTimestamp = Date.now();
+              merged.schedule.endTimestamp = Date.now() + durSec * 1000;
+            }
+          } else if (merged.schedule.scheduleType !== 'duration_timer') {
+            merged.schedule.startTimestamp = undefined;
+            merged.schedule.endTimestamp = undefined;
+          }
+          return merged;
+        }
+        return p;
+      });
     } else {
+      const sched = promoForm.schedule || { allDay: true, startTime: '00:00', endTime: '23:59', daysOfWeek: [0,1,2,3,4,5,6] };
+      if (!sched.scheduleType) {
+        sched.scheduleType = 'time_range';
+      }
+      if (sched.scheduleType === 'duration_timer') {
+        const durSec = sched.durationSeconds || 300;
+        sched.startTimestamp = Date.now();
+        sched.endTimestamp = Date.now() + durSec * 1000;
+      }
       const newPromo: Promotion = {
         id: 'p_' + Date.now(),
         title: promoForm.title || 'Special Promotion',
@@ -329,7 +367,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
         badgeText: promoForm.badgeText || 'NEW OFFER',
         imageUrl: promoForm.imageUrl || PRESET_IMAGES[0].url,
         theme: promoForm.theme || 'elegant_gold',
-        schedule: promoForm.schedule || { allDay: true, startTime: '00:00', endTime: '23:59', daysOfWeek: [0,1,2,3,4,5,6] },
+        schedule: sched,
         duration: promoForm.duration || 10,
         isActive: true,
       };
@@ -352,6 +390,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
       imageUrl: PRESET_IMAGES[0].url,
       theme: 'elegant_gold',
       schedule: {
+        scheduleType: 'time_range',
         allDay: false,
         startTime: '08:00',
         endTime: '12:00',
@@ -371,12 +410,47 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
   };
 
   const togglePromoActive = (id: string) => {
-    const updated = promotions.map((p) =>
-      p.id === id ? { ...p, isActive: !p.isActive } : p
-    );
+    let nextLayoutId = state.currentLayoutId;
+    const updated = promotions.map((p) => {
+      if (p.id === id) {
+        const nextActive = !p.isActive;
+        if (p.schedule.scheduleType === 'duration_timer') {
+          if (nextActive) {
+            const durSec = p.schedule.durationSeconds || 300;
+            // Auto switch layout to 'l2' (split view with promo) or 'l5' / 'promo_focus' if currently on layout with no promo
+            if (state.currentLayoutId === 'l1' || state.currentLayoutId === 'l4') {
+              nextLayoutId = 'l2'; // Switch to L-Shape split to ensure promo displays instantly
+            }
+            return {
+              ...p,
+              isActive: true,
+              schedule: {
+                ...p.schedule,
+                startTimestamp: Date.now(),
+                endTimestamp: Date.now() + durSec * 1000
+              }
+            };
+          } else {
+            return {
+              ...p,
+              isActive: false,
+              schedule: {
+                ...p.schedule,
+                startTimestamp: undefined,
+                endTimestamp: undefined
+              }
+            };
+          }
+        }
+        return { ...p, isActive: nextActive };
+      }
+      return p;
+    });
+
     onChange({
       ...state,
       promotions: updated,
+      currentLayoutId: nextLayoutId
     });
   };
 
@@ -1188,99 +1262,229 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
 
                       {/* Scheduling Settings */}
                       <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-lg space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-mono text-slate-400 uppercase">Pengaturan Waktu Tayang Jadwal</span>
-                          <label className="flex items-center space-x-1.5 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={promoForm.schedule?.allDay}
-                              onChange={(e) => {
-                                const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
+                        <div>
+                          <label className="block text-[9px] font-mono text-slate-500 uppercase mb-1.5">Tipe Penjadwalan Promo</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [0,1,2,3,4,5,6] };
                                 setPromoForm({
                                   ...promoForm,
-                                  schedule: { ...sched, allDay: e.target.checked }
+                                  schedule: {
+                                    ...sched,
+                                    scheduleType: 'time_range'
+                                  }
                                 });
                               }}
-                              className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0"
-                            />
-                            <span className="text-[10px] font-mono text-slate-300 uppercase">TAMPIL 24 JAM</span>
-                          </label>
+                              className={`py-1.5 px-3 rounded text-xs font-bold border transition-all ${
+                                (promoForm.schedule?.scheduleType || 'time_range') === 'time_range'
+                                  ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                              }`}
+                            >
+                              🕒 Berdasarkan Jam
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [0,1,2,3,4,5,6] };
+                                setPromoForm({
+                                  ...promoForm,
+                                  schedule: {
+                                    ...sched,
+                                    scheduleType: 'duration_timer',
+                                    durationSeconds: sched.durationSeconds || 300
+                                  }
+                                });
+                              }}
+                              className={`py-1.5 px-3 rounded text-xs font-bold border transition-all ${
+                                promoForm.schedule?.scheduleType === 'duration_timer'
+                                  ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
+                              }`}
+                            >
+                              ⏱️ Berdasarkan Durasi
+                            </button>
+                          </div>
                         </div>
 
-                        {!promoForm.schedule?.allDay && (
-                          <div className="grid grid-cols-2 gap-3 pt-1">
+                        {promoForm.schedule?.scheduleType === 'duration_timer' ? (
+                          <div className="space-y-3 pt-1">
                             <div>
-                              <label className="block text-[9px] font-mono text-slate-500 uppercase">Jam Mulai Tayang</label>
-                              <input
-                                type="time"
-                                required
-                                value={promoForm.schedule?.startTime || '08:00'}
-                                onChange={(e) => {
-                                  const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
-                                  setPromoForm({
-                                    ...promoForm,
-                                    schedule: { ...sched, startTime: e.target.value }
-                                  });
-                                }}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white mt-1"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] font-mono text-slate-500 uppercase">Jam Berhenti Tayang</label>
-                              <input
-                                type="time"
-                                required
-                                value={promoForm.schedule?.endTime || '12:00'}
-                                onChange={(e) => {
-                                  const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
-                                  setPromoForm({
-                                    ...promoForm,
-                                    schedule: { ...sched, endTime: e.target.value }
-                                  });
-                                }}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white mt-1"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Days selection */}
-                        <div className="pt-1">
-                          <label className="block text-[9px] font-mono text-slate-500 uppercase mb-1.5">Hari Tayang Aktif</label>
-                          <div className="flex gap-1">
-                            {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day, idx) => {
-                              const daysList = promoForm.schedule?.daysOfWeek || [];
-                              const isSelected = daysList.includes(idx);
-                              return (
-                                <button
-                                  key={day}
-                                  type="button"
-                                  onClick={() => {
-                                    const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [] };
-                                    let nextDays = [...daysList];
-                                    if (nextDays.includes(idx)) {
-                                      nextDays = nextDays.filter((d) => d !== idx);
-                                    } else {
-                                      nextDays.push(idx);
-                                    }
+                              <label className="block text-[9px] font-mono text-slate-500 uppercase">Durasi Timer</label>
+                              <div className="flex items-center gap-2 mt-1">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Menit"
+                                  value={Math.floor((promoForm.schedule?.durationSeconds || 300) / 60)}
+                                  onChange={(e) => {
+                                    const m = parseInt(e.target.value, 10) || 0;
+                                    const s = (promoForm.schedule?.durationSeconds || 300) % 60;
+                                    const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [0,1,2,3,4,5,6] };
                                     setPromoForm({
                                       ...promoForm,
-                                      schedule: { ...sched, daysOfWeek: nextDays }
+                                      schedule: {
+                                        ...sched,
+                                        durationSeconds: m * 60 + s
+                                      }
                                     });
                                   }}
-                                  className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                                    isSelected
-                                      ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
-                                      : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                                  className="w-1/2 bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white"
+                                />
+                                <span className="text-slate-500 text-xs font-mono">Min</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="59"
+                                  placeholder="Detik"
+                                  value={(promoForm.schedule?.durationSeconds || 300) % 60}
+                                  onChange={(e) => {
+                                    const s = parseInt(e.target.value, 10) || 0;
+                                    const m = Math.floor((promoForm.schedule?.durationSeconds || 300) / 60);
+                                    const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [0,1,2,3,4,5,6] };
+                                    setPromoForm({
+                                      ...promoForm,
+                                      schedule: {
+                                        ...sched,
+                                        durationSeconds: m * 60 + s
+                                      }
+                                    });
+                                  }}
+                                  className="w-1/2 bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white"
+                                />
+                                <span className="text-slate-500 text-xs font-mono">Detik</span>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { label: '30 dtk', sec: 30 },
+                                { label: '1 mnt', sec: 60 },
+                                { label: '3 mnt', sec: 180 },
+                                { label: '5 mnt', sec: 300 },
+                                { label: '10 mnt', sec: 600 },
+                              ].map((preset) => (
+                                <button
+                                  key={preset.label}
+                                  type="button"
+                                  onClick={() => {
+                                    const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [0,1,2,3,4,5,6] };
+                                    setPromoForm({
+                                      ...promoForm,
+                                      schedule: {
+                                        ...sched,
+                                        durationSeconds: preset.sec
+                                      }
+                                    });
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                                    promoForm.schedule?.durationSeconds === preset.sec
+                                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-300'
                                   }`}
                                 >
-                                  {day}
+                                  {preset.label}
                                 </button>
-                              );
-                            })}
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <>
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] font-mono text-slate-400 uppercase">Pengaturan Waktu Tayang Jadwal</span>
+                              <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={promoForm.schedule?.allDay}
+                                  onChange={(e) => {
+                                    const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
+                                    setPromoForm({
+                                      ...promoForm,
+                                      schedule: { ...sched, allDay: e.target.checked }
+                                    });
+                                  }}
+                                  className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0 focus:ring-offset-0"
+                                />
+                                <span className="text-[10px] font-mono text-slate-300 uppercase">TAMPIL 24 JAM</span>
+                              </label>
+                            </div>
 
+                            {!promoForm.schedule?.allDay && (
+                              <div className="grid grid-cols-2 gap-3 pt-1">
+                                <div>
+                                  <label className="block text-[9px] font-mono text-slate-500 uppercase">Jam Mulai Tayang</label>
+                                  <input
+                                    type="time"
+                                    required
+                                    value={promoForm.schedule?.startTime || '08:00'}
+                                    onChange={(e) => {
+                                      const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
+                                      setPromoForm({
+                                        ...promoForm,
+                                        schedule: { ...sched, startTime: e.target.value }
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-mono text-slate-500 uppercase">Jam Berhenti Tayang</label>
+                                  <input
+                                    type="time"
+                                    required
+                                    value={promoForm.schedule?.endTime || '12:00'}
+                                    onChange={(e) => {
+                                      const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [1,2,3,4,5] };
+                                      setPromoForm({
+                                        ...promoForm,
+                                        schedule: { ...sched, endTime: e.target.value }
+                                      });
+                                    }}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs text-white mt-1"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Days selection */}
+                            <div className="pt-1">
+                              <label className="block text-[9px] font-mono text-slate-500 uppercase mb-1.5">Hari Tayang Aktif</label>
+                              <div className="flex gap-1">
+                                {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day, idx) => {
+                                  const daysList = promoForm.schedule?.daysOfWeek || [];
+                                  const isSelected = daysList.includes(idx);
+                                  return (
+                                    <button
+                                      key={day}
+                                      type="button"
+                                      onClick={() => {
+                                        const sched = promoForm.schedule || { allDay: false, startTime: '08:00', endTime: '12:00', daysOfWeek: [] };
+                                        let nextDays = [...daysList];
+                                        if (nextDays.includes(idx)) {
+                                          nextDays = nextDays.filter((d) => d !== idx);
+                                        } else {
+                                          nextDays.push(idx);
+                                        }
+                                        setPromoForm({
+                                          ...promoForm,
+                                          schedule: { ...sched, daysOfWeek: nextDays }
+                                        });
+                                      }}
+                                      className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
+                                        isSelected
+                                          ? 'bg-indigo-600/30 border-indigo-500 text-indigo-300'
+                                          : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                                      }`}
+                                    >
+                                      {day}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -1341,15 +1545,35 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                             
                             {/* Schedule info display */}
                             <div className="flex items-center space-x-3 text-[9px] font-mono text-slate-500 mt-2 flex-wrap gap-y-1">
-                              <span className="bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-850 text-indigo-400 font-bold">
-                                🕒 {promo.schedule.allDay ? '24 JAM PENUH' : `${promo.schedule.startTime} - ${promo.schedule.endTime}`}
-                              </span>
-                              <span>•</span>
-                              <span className="text-slate-400">HARI: {
-                                promo.schedule.daysOfWeek.length === 7 
-                                  ? 'SETIAP HARI' 
-                                  : promo.schedule.daysOfWeek.map(d => ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][d]).join(', ')
-                              }</span>
+                              {promo.schedule.scheduleType === 'duration_timer' ? (
+                                <>
+                                  <span className="bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-850 text-amber-400 font-bold flex items-center gap-1">
+                                    ⏱️ DURASI: {Math.floor((promo.schedule.durationSeconds || 300) / 60)}m {(promo.schedule.durationSeconds || 300) % 60}s
+                                  </span>
+                                  {promo.isActive && promo.schedule.endTimestamp && (
+                                    <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 px-2 py-0.5 rounded-lg font-bold animate-pulse">
+                                      SISA: {(() => {
+                                        const leftSec = Math.max(0, Math.ceil((promo.schedule.endTimestamp - Date.now()) / 1000));
+                                        const m = Math.floor(leftSec / 60);
+                                        const s = leftSec % 60;
+                                        return `${m}:${s.toString().padStart(2, '0')}`;
+                                      })()}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <span className="bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-850 text-indigo-400 font-bold">
+                                    🕒 {promo.schedule.allDay ? '24 JAM PENUH' : `${promo.schedule.startTime} - ${promo.schedule.endTime}`}
+                                  </span>
+                                  <span>•</span>
+                                  <span className="text-slate-400">HARI: {
+                                    promo.schedule.daysOfWeek.length === 7 
+                                      ? 'SETIAP HARI' 
+                                      : promo.schedule.daysOfWeek.map(d => ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][d]).join(', ')
+                                  }</span>
+                                </>
+                              )}
                               <span>•</span>
                               <span className="text-slate-400">SLIDE: {promo.duration}s</span>
                             </div>
@@ -2029,7 +2253,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
               
               {/* The Signage TV engine player */}
               <div className="relative z-0 overflow-hidden rounded-2xl bg-black">
-                <SignageDisplay state={state} layout={activeLayout} previewMode={true} />
+                <SignageDisplay state={state} layout={activeLayout} previewMode={true} onChange={onChange} />
               </div>
 
               {/* Lower TV Brand logo watermark */}

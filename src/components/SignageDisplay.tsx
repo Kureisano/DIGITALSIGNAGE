@@ -15,6 +15,7 @@ interface SignageDisplayProps {
   layout: LayoutConfig;
   previewMode?: boolean; // If true, scales the font sizes and elements to fit preview containers gracefully
   customTimeOverride?: string; // e.g. for previewing schedules in real-time
+  onChange?: (newState: SignageState) => void;
 }
 
 export default function SignageDisplay({
@@ -22,6 +23,7 @@ export default function SignageDisplay({
   layout,
   previewMode = false,
   customTimeOverride,
+  onChange,
 }: SignageDisplayProps) {
   const { 
     promotions, 
@@ -134,6 +136,15 @@ export default function SignageDisplay({
   // 2. Filter scheduled promotions
   const [activePromos, setActivePromos] = useState<Promotion[]>([]);
   const [currentPromoIndex, setCurrentPromoIndex] = useState(0);
+  const [tickSecond, setTickSecond] = useState(0);
+
+  // 1-second ticker for counting down duration timers
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTickSecond((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const timeToMinutes = (t: string) => {
@@ -142,11 +153,20 @@ export default function SignageDisplay({
     };
 
     const currentMins = timeToMinutes(activeTime);
+    const now = Date.now();
 
     const filtered = promotions.filter((promo) => {
       if (!promo.isActive) return false;
       
       const sched = promo.schedule;
+
+      // Handle duration timer schedules
+      if (sched.scheduleType === 'duration_timer') {
+        if (sched.endTimestamp) {
+          return now < sched.endTimestamp;
+        }
+        return true; // if active but no endTimestamp is set yet, keep active
+      }
       
       // Day of week check
       if (sched.daysOfWeek.length > 0 && !sched.daysOfWeek.includes(currentDay)) {
@@ -166,9 +186,63 @@ export default function SignageDisplay({
       }
     });
 
-    setActivePromos(filtered);
-    setCurrentPromoIndex(0); // Reset slide index on schedule change
-  }, [promotions, activeTime, currentDay]);
+    // Only update state if the filtered list of promotions actually changed
+    setActivePromos((prevActivePromos) => {
+      const prevIds = prevActivePromos.map((p) => p.id).join(',');
+      const nextIds = filtered.map((p) => p.id).join(',');
+      if (prevIds !== nextIds) {
+        setCurrentPromoIndex(0); // Reset slide index ONLY when the set of active promos actually changes
+        return filtered;
+      }
+      return prevActivePromos;
+    });
+  }, [promotions, activeTime, currentDay, tickSecond]);
+
+  // Handle auto-deactivation and autoplay layout transitions when a duration-based promo expires
+  useEffect(() => {
+    if (previewMode || !onChange) return;
+
+    const now = Date.now();
+    let hasExpired = false;
+    
+    const updatedPromos = promotions.map((p) => {
+      if (
+        p.isActive &&
+        p.schedule.scheduleType === 'duration_timer' &&
+        p.schedule.endTimestamp &&
+        now >= p.schedule.endTimestamp
+      ) {
+        hasExpired = true;
+        return {
+          ...p,
+          isActive: false, // Mark expired promo as inactive
+        };
+      }
+      return p;
+    });
+
+    if (hasExpired) {
+      // Transition back to a default layout (e.g. l1 'full_tv' or l2 'l_shape') if we are currently in 'promo_focus'
+      let nextLayoutId = state.currentLayoutId;
+      const hasAnyActivePromosAfterUpdate = updatedPromos.some((p) => {
+        if (!p.isActive) return false;
+        if (p.schedule.scheduleType === 'duration_timer') {
+          return p.schedule.endTimestamp ? now < p.schedule.endTimestamp : true;
+        }
+        return true;
+      });
+
+      if (!hasAnyActivePromosAfterUpdate && state.currentLayoutId === 'promo_focus') {
+        nextLayoutId = 'l1'; // Autoplay: Switch layout to Standard Landscape TV (Full TV)
+      }
+
+      onChange({
+        ...state,
+        promotions: updatedPromos,
+        currentLayoutId: nextLayoutId,
+      });
+    }
+  }, [promotions, state, onChange, previewMode, tickSecond]);
 
   // 3. Slide interval for promotions rotation
   const activePromo = activePromos[currentPromoIndex] || null;
@@ -523,21 +597,50 @@ export default function SignageDisplay({
 
         {/* Footer info & slide duration visualizer */}
         <div className="border-t border-slate-800/80 pt-3 flex items-center justify-between z-10">
-          <div className="flex items-center text-slate-400 text-[8px] space-x-1 font-mono truncate max-w-[65%]">
-            <Calendar className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-            <span className="tracking-wider uppercase truncate">JADWAL: {promo.schedule.startTime} - {promo.schedule.endTime}</span>
-          </div>
-          
-          {/* Sliding Timer bar */}
-          <div className="w-20 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-            <div
-              className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full"
-              style={{
-                width: '100%',
-                animation: `shrinkWidth ${(promo.duration || 10)}s linear infinite`
-              }}
-            />
-          </div>
+          {promo.schedule.scheduleType === 'duration_timer' ? (() => {
+            const now = Date.now();
+            const totalSec = promo.schedule.durationSeconds || 60;
+            const leftMs = (promo.schedule.endTimestamp || now) - now;
+            const leftSec = Math.max(0, Math.ceil(leftMs / 1000));
+            const mins = Math.floor(leftSec / 60);
+            const secs = leftSec % 60;
+            const progressPercent = Math.min(100, Math.max(0, (leftMs / (totalSec * 1000)) * 100));
+
+            return (
+              <>
+                <div className="flex items-center text-amber-400 text-[9px] space-x-1 font-mono font-bold animate-pulse">
+                  <Flame className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                  <span className="tracking-wider uppercase">FLASH PROMO: {mins.toString().padStart(2, '0')}:{secs.toString().padStart(2, '0')} TERSISA</span>
+                </div>
+                
+                {/* Countdown progress bar */}
+                <div className="w-24 h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 via-rose-500 to-red-500 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </>
+            );
+          })() : (
+            <>
+              <div className="flex items-center text-slate-400 text-[8px] space-x-1 font-mono truncate max-w-[65%]">
+                <Calendar className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                <span className="tracking-wider uppercase truncate">JADWAL: {promo.schedule.allDay ? '24 JAM PENUH' : `${promo.schedule.startTime} - ${promo.schedule.endTime}`}</span>
+              </div>
+              
+              {/* Sliding Timer bar */}
+              <div className="w-20 h-1 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full"
+                  style={{
+                    width: '100%',
+                    animation: `shrinkWidth ${(promo.duration || 10)}s linear infinite`
+                  }}
+                />
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

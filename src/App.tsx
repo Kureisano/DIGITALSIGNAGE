@@ -98,7 +98,7 @@ export default function App() {
       <div className="w-screen h-screen overflow-hidden bg-black flex items-center justify-center">
         {/* Full View TV Signage with no margins/paddings */}
         <div className="w-full h-full">
-          <SignageDisplay state={state} layout={activeLayout} previewMode={false} />
+          <SignageDisplay state={state} layout={activeLayout} previewMode={false} onChange={handleStateChange} />
         </div>
       </div>
     );
