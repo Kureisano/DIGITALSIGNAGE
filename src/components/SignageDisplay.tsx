@@ -199,16 +199,38 @@ export default function SignageDisplay({
 
   const activeCCTVs = camerasList.filter(c => activeCCTVIds.includes(c.id));
 
-  // Video reference handling
+  // Video reference handling and Autoplay recovery
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState(false);
+  const [userActivatedAudio, setUserActivatedAudio] = useState(false);
+  const [videoMutedOverride, setVideoMutedOverride] = useState(false);
+
+  const handleScreenInteraction = () => {
+    if (!userActivatedAudio) {
+      setUserActivatedAudio(true);
+    }
+    if (videoRef.current) {
+      videoRef.current.muted = volume === 0;
+      setVideoMutedOverride(false);
+      videoRef.current.play().catch(() => {});
+    }
+  };
 
   useEffect(() => {
     setVideoError(false);
     if (videoRef.current) {
       videoRef.current.load();
-      videoRef.current.play().catch(() => {
-        // Silently capture play block (usually browser requirements for muting/user gesture)
+      
+      // Attempt standard play, fall back to muted play if browser blocks unmuted autoplay
+      videoRef.current.play().catch((err) => {
+        console.warn("Unmuted autoplay blocked, trying muted:", err);
+        if (videoRef.current) {
+          videoRef.current.muted = true;
+          setVideoMutedOverride(true);
+          videoRef.current.play().catch(e => {
+            console.error("Muted autoplay also failed:", e);
+          });
+        }
       });
     }
   }, [activeTVChannelId]);
@@ -216,9 +238,9 @@ export default function SignageDisplay({
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume / 100;
-      videoRef.current.muted = volume === 0;
+      videoRef.current.muted = videoMutedOverride || volume === 0;
     }
-  }, [volume]);
+  }, [volume, videoMutedOverride]);
 
   // Helper theme mapping
   const getThemeStyles = (themeName: string) => {
@@ -347,7 +369,9 @@ export default function SignageDisplay({
     const ytId = getYouTubeId(activeChannel.videoUrl);
 
     if (ytId) {
-      const isMuted = volume === 0 ? 1 : 0;
+      // Force muted (mute=1) on load to guarantee browser autoplay.
+      // Once the user interacts/taps, userActivatedAudio becomes true and we unmute if volume > 0.
+      const isMuted = (!userActivatedAudio || volume === 0) ? 1 : 0;
       return (
         <div className="relative w-full h-full bg-black">
           <iframe
@@ -393,7 +417,7 @@ export default function SignageDisplay({
           src={activeChannel.videoUrl}
           autoPlay
           loop
-          muted={volume === 0}
+          muted={videoMutedOverride || volume === 0}
           playsInline
           onError={() => setVideoError(true)}
           className="w-full h-full object-cover"
@@ -808,10 +832,18 @@ export default function SignageDisplay({
   return (
     <div
       id="signage-view"
-      className={`relative w-full h-full flex flex-col ${themeConfig.bg} text-slate-50 select-none overflow-hidden ${
+      onClick={handleScreenInteraction}
+      className={`relative w-full h-full flex flex-col ${themeConfig.bg} text-slate-50 select-none overflow-hidden cursor-pointer ${
         layout.orientation === 'portrait' ? 'aspect-[9/16]' : 'aspect-[16/9]'
       }`}
     >
+      {/* Tap to Unmute Overlay for Autoplay restrictions bypass */}
+      {(!userActivatedAudio || videoMutedOverride) && volume > 0 && !previewMode && (
+        <div className="absolute top-4 right-4 z-50 bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2 rounded-full font-bold text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.5)] animate-pulse select-none">
+          <VolumeX className="w-4 h-4" />
+          <span>Suara Terbungkam (Ketuk Layar untuk Suara)</span>
+        </div>
+      )}
       <style>{`
         @keyframes bounceWave {
           0% { transform: scaleY(0.1); }
