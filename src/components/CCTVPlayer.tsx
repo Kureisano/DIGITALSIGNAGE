@@ -135,6 +135,10 @@ export default function CCTVPlayer({ camera, simulatedTime }: CCTVPlayerProps) {
   }
 
   if (hasStream) {
+    const safeOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
+    const encodedOrigin = safeOrigin ? encodeURIComponent(safeOrigin) : '';
+    const embedUrl = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&loop=1&playlist=${ytId}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&disablekb=1${encodedOrigin ? `&origin=${encodedOrigin}` : ''}`;
+
     return (
       <div className="relative w-full h-full overflow-hidden bg-black group rounded-lg border border-slate-800">
         <style>{`
@@ -151,7 +155,7 @@ export default function CCTVPlayer({ camera, simulatedTime }: CCTVPlayerProps) {
         <div className={`w-full h-full transition-all duration-300 ${filterClass}`}>
           {isYt ? (
             <iframe
-              src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&loop=1&playlist=${ytId}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&disablekb=1`}
+              src={embedUrl}
               title={camera.name}
               className="w-full h-full object-cover border-0 pointer-events-none scale-[1.05]"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

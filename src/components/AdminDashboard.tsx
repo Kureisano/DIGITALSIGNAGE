@@ -823,7 +823,7 @@ export default function AdminDashboard({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="h-screen max-h-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* 1. Header Navigation Bar */}
       <header className="border-b border-slate-800 bg-slate-950/60 backdrop-blur-md sticky top-0 z-30 px-6 py-4 flex flex-col xl:flex-row justify-between items-center gap-4">
         <div className="flex flex-col md:flex-row items-center gap-4 w-full xl:w-auto justify-between md:justify-start">
@@ -893,10 +893,10 @@ export default function AdminDashboard({
       </header>
 
       {/* 2. Main content area: Split Sidebar controls vs Signage Display Preview */}
-      <div className="flex-1 grid grid-cols-12 overflow-hidden min-h-0">
+      <div className="flex-1 grid grid-cols-12 overflow-y-auto lg:overflow-hidden min-h-0">
         
         {/* SIDE A: CONTROL DASHBOARD PANELS (col-span-12 to col-span-7) */}
-        <div className="col-span-12 lg:col-span-7 border-r border-slate-800/80 flex flex-col h-full bg-slate-950 overflow-y-auto">
+        <div className="col-span-12 lg:col-span-7 border-r border-slate-800/80 flex flex-col h-auto lg:h-full bg-slate-950 lg:overflow-y-auto">
           
           {/* Section Selector Tab list */}
           <nav className="flex flex-wrap border-b border-slate-800 bg-slate-900/10 p-2 gap-1.5 sticky top-0 z-10 backdrop-blur-md">
@@ -3696,7 +3696,7 @@ export default function AdminDashboard({
         </div>
 
         {/* SIDE B: INTERACTIVE TV SIGNAGE MONITOR PREVIEW (col-span-12 to col-span-5) */}
-        <div className="col-span-12 lg:col-span-5 bg-slate-950 flex flex-col h-full border-l border-slate-800/80 sticky top-16 overflow-y-auto">
+        <div className="col-span-12 lg:col-span-5 bg-slate-950 flex flex-col h-auto lg:h-full border-l border-slate-800/80 lg:sticky lg:top-16 lg:overflow-y-auto">
           
           {/* Header Preview controls */}
           <div className="border-b border-slate-800 bg-slate-900/10 p-4 flex justify-between items-center">

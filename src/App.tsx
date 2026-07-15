@@ -90,7 +90,12 @@ export default function App() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data && Array.isArray(data.displays)) {
-          setDisplaysList(data.displays);
+          setDisplaysList(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(data.displays)) {
+              return prev;
+            }
+            return data.displays;
+          });
         }
       } else {
         // First-time seed of physical displays
@@ -100,7 +105,12 @@ export default function App() {
           { id: 'display_office', name: 'Layar Informasi Kantor', location: 'Ruang Kerja Bersama Lantai 2', createdAt: Date.now() }
         ];
         setDoc(displaysRef, sanitizeForFirestore({ displays: INITIAL_DISPLAYS }))
-          .then(() => setDisplaysList(INITIAL_DISPLAYS))
+          .then(() => setDisplaysList(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(INITIAL_DISPLAYS)) {
+              return prev;
+            }
+            return INITIAL_DISPLAYS;
+          }))
           .catch(err => {
             console.error("Error seeding displays list:", err);
             if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
@@ -133,7 +143,12 @@ export default function App() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data && Array.isArray(data.admins)) {
-          setAdminUsersList(data.admins);
+          setAdminUsersList(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(data.admins)) {
+              return prev;
+            }
+            return data.admins;
+          });
         }
       } else {
         // Seed default super administrator
@@ -148,7 +163,12 @@ export default function App() {
           }
         ];
         setDoc(adminsRef, sanitizeForFirestore({ admins: INITIAL_ADMINS }))
-          .then(() => setAdminUsersList(INITIAL_ADMINS))
+          .then(() => setAdminUsersList(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(INITIAL_ADMINS)) {
+              return prev;
+            }
+            return INITIAL_ADMINS;
+          }))
           .catch(err => {
             console.error("Error seeding admins list:", err);
             if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
@@ -184,7 +204,12 @@ export default function App() {
       snapshot.forEach((doc) => {
         statuses[doc.id] = doc.data();
       });
-      setDisplayStatuses(statuses);
+      setDisplayStatuses(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(statuses)) {
+          return prev;
+        }
+        return statuses;
+      });
     }, (error: any) => {
       console.error("Error fetching display statuses:", error);
       if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
@@ -234,7 +259,12 @@ export default function App() {
       if (!isMounted) return;
       if (snapshot.exists()) {
         const cloudState = snapshot.data() as SignageState;
-        setState(cloudState);
+        setState(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(cloudState)) {
+            return prev;
+          }
+          return cloudState;
+        });
         localStorage.setItem(`signage_state_${activeSubscriptionId}`, JSON.stringify(cloudState));
       } else {
         // Document doesn't exist yet, seed it safely with a getDoc fallback
@@ -244,14 +274,29 @@ export default function App() {
             const oldSnapshot = await getDoc(oldRef);
             if (oldSnapshot.exists()) {
               const oldData = oldSnapshot.data() as SignageState;
-              if (isMounted) setState(oldData);
+              if (isMounted) {
+                setState(prev => {
+                  if (JSON.stringify(prev) === JSON.stringify(oldData)) return prev;
+                  return oldData;
+                });
+              }
               await setDoc(docRef, sanitizeForFirestore(oldData));
             } else {
-              if (isMounted) setState(INITIAL_SIGNAGE_STATE);
+              if (isMounted) {
+                setState(prev => {
+                  if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+                  return INITIAL_SIGNAGE_STATE;
+                });
+              }
               await setDoc(docRef, sanitizeForFirestore(INITIAL_SIGNAGE_STATE));
             }
           } else {
-            if (isMounted) setState(INITIAL_SIGNAGE_STATE);
+            if (isMounted) {
+              setState(prev => {
+                if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+                return INITIAL_SIGNAGE_STATE;
+              });
+            }
             await setDoc(docRef, sanitizeForFirestore(INITIAL_SIGNAGE_STATE));
           }
         } catch (err: any) {
@@ -263,12 +308,22 @@ export default function App() {
             const saved = localStorage.getItem(`signage_state_${activeSubscriptionId}`);
             if (saved) {
               try {
-                setState(JSON.parse(saved));
+                const parsed = JSON.parse(saved);
+                setState(prev => {
+                  if (JSON.stringify(prev) === saved) return prev;
+                  return parsed;
+                });
               } catch (e) {
-                setState(INITIAL_SIGNAGE_STATE);
+                setState(prev => {
+                  if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+                  return INITIAL_SIGNAGE_STATE;
+                });
               }
             } else {
-              setState(INITIAL_SIGNAGE_STATE);
+              setState(prev => {
+                if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+                return INITIAL_SIGNAGE_STATE;
+              });
             }
           }
         }
@@ -282,12 +337,22 @@ export default function App() {
       const saved = localStorage.getItem(`signage_state_${activeSubscriptionId}`);
       if (saved) {
         try {
-          setState(JSON.parse(saved));
+          const parsed = JSON.parse(saved);
+          setState(prev => {
+            if (JSON.stringify(prev) === saved) return prev;
+            return parsed;
+          });
         } catch (e) {
-          setState(INITIAL_SIGNAGE_STATE);
+          setState(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+            return INITIAL_SIGNAGE_STATE;
+          });
         }
       } else {
-        setState(INITIAL_SIGNAGE_STATE);
+        setState(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(INITIAL_SIGNAGE_STATE)) return prev;
+          return INITIAL_SIGNAGE_STATE;
+        });
       }
     });
 
@@ -295,6 +360,28 @@ export default function App() {
       isMounted = false;
       unsubscribe();
     };
+  }, [activeSubscriptionId]);
+
+  // 3b. Real-Time cross-tab synchronization fallback via localStorage events
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === `signage_state_${activeSubscriptionId}`) {
+        if (e.newValue) {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            setState(prev => {
+              if (JSON.stringify(prev) === e.newValue) return prev;
+              return parsed;
+            });
+          } catch (err) {
+            console.warn("Failed to parse localStorage change event:", err);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, [activeSubscriptionId]);
 
   // 4. State update propagation (Writes to Firestore for instant display updates)

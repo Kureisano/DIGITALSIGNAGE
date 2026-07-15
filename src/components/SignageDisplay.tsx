@@ -611,10 +611,14 @@ export default function SignageDisplay({
       // Force muted (mute=1) on load to guarantee browser autoplay.
       // Once the user interacts/taps, userActivatedAudio becomes true and we unmute if volume > 0.
       const isMuted = (!userActivatedAudio || volume === 0) ? 1 : 0;
+      const safeOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
+      const encodedOrigin = safeOrigin ? encodeURIComponent(safeOrigin) : '';
+      const embedUrl = `https://www.youtube.com/embed/${ytId}?autoplay=1&mute=${isMuted}&loop=1&playlist=${ytId}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&disablekb=1${encodedOrigin ? `&origin=${encodedOrigin}` : ''}`;
+
       return (
         <div className="relative w-full h-full bg-black">
           <iframe
-            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=${isMuted}&loop=1&playlist=${ytId}&controls=0&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3&disablekb=1`}
+            src={embedUrl}
             title={activeChannel.name}
             className="w-full h-full object-cover border-0 pointer-events-none scale-[1.05]"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
