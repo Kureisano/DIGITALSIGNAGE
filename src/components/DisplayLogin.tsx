@@ -10,7 +10,6 @@ interface DisplayLoginProps {
 
 export default function DisplayLogin({ onLoginSuccess, displaysList = [], adminUsers = [] }: DisplayLoginProps) {
   const [displayIdInput, setDisplayIdInput] = useState('');
-  const [displayNameInput, setDisplayNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -21,11 +20,10 @@ export default function DisplayLogin({ onLoginSuccess, displaysList = [], adminU
     setError('');
 
     const inputId = displayIdInput.trim();
-    const inputName = displayNameInput.trim();
     const inputPass = passwordInput.trim();
 
-    if (!inputId || !inputName || !inputPass) {
-      setError('Semua kolom (ID Layar, Nama Layar, dan Password Admin) wajib diisi.');
+    if (!inputId || !inputPass) {
+      setError('Semua kolom (ID Layar dan Password) wajib diisi.');
       return;
     }
 
@@ -41,14 +39,7 @@ export default function DisplayLogin({ onLoginSuccess, displaysList = [], adminU
         return;
       }
 
-      // 2. Check if the display Name matches (case-insensitive)
-      if (matchedDisplay.name.trim().toLowerCase() !== inputName.toLowerCase()) {
-        setError('Nama Layar tidak sesuai dengan yang terdaftar di Manajemen Layar. Silakan hubungi Administrator.');
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. Verify Password (Must be equal to Display ID)
+      // 2. Verify Password (Must be equal to Display ID)
       const isPasswordValid = inputPass === inputId;
 
       if (!isPasswordValid) {
@@ -124,26 +115,6 @@ export default function DisplayLogin({ onLoginSuccess, displaysList = [], adminU
                   placeholder="Contoh: display_cafeteria, global_state"
                   disabled={isLoading}
                   className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors font-mono"
-                />
-              </div>
-            </div>
-
-            {/* Display Name Input */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-mono tracking-widest uppercase text-slate-400 block">
-                Nama Layar Terdaftar
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500 pointer-events-none">
-                  <Tv className="w-4 h-4" />
-                </span>
-                <input
-                  type="text"
-                  value={displayNameInput}
-                  onChange={(e) => setDisplayNameInput(e.target.value)}
-                  placeholder="Contoh: Layar Kafe & Menu"
-                  disabled={isLoading}
-                  className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
                 />
               </div>
             </div>

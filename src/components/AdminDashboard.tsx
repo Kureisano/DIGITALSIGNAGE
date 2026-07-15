@@ -13,6 +13,7 @@ interface AdminDashboardProps {
   state: SignageState;
   onChange: (newState: SignageState) => void;
   displaysList: DisplayItem[];
+  displayStatuses?: Record<string, any>;
   selectedDisplayId: string;
   onSelectDisplay: (id: string) => void;
   onAddDisplay: (display: DisplayItem) => void;
@@ -40,6 +41,7 @@ export default function AdminDashboard({
   state, 
   onChange,
   displaysList = [],
+  displayStatuses = {},
   selectedDisplayId = 'global_state',
   onSelectDisplay,
   onAddDisplay,
@@ -71,6 +73,35 @@ export default function AdminDashboard({
 
   const channelsList = channels || PRESET_CHANNELS;
   const cctvsList = cctvs || PRESET_CCTVS;
+
+  const getDisplayStatus = (displayId: string) => {
+    const status = displayStatuses?.[displayId];
+    if (!status) return { isOnline: false, text: 'Belum Terkoneksi', lastSeenText: 'Belum pernah aktif' };
+    
+    const isOnline = Date.now() - status.lastSeen < 40000; // 40 seconds threshold
+    const secondsAgo = Math.floor((Date.now() - status.lastSeen) / 1000);
+    
+    let lastSeenText = '';
+    if (isOnline) {
+      lastSeenText = secondsAgo < 5 ? 'Baru saja' : `${secondsAgo} detik lalu`;
+    } else {
+      if (secondsAgo < 60) {
+        lastSeenText = `${secondsAgo} detik lalu`;
+      } else if (secondsAgo < 3600) {
+        lastSeenText = `${Math.floor(secondsAgo / 60)} menit lalu`;
+      } else {
+        lastSeenText = new Date(status.lastSeen).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+
+    return {
+      isOnline,
+      text: isOnline ? 'Online' : 'Offline',
+      lastSeenText,
+      currentLayoutId: status.currentLayoutId,
+      userAgent: status.userAgent
+    };
+  };
 
   // TV Sync and Copy-Paste local feedback states
   const [copiedFeedback, setCopiedFeedback] = useState(false);
@@ -766,6 +797,61 @@ export default function AdminDashboard({
                     <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase mt-2 inline-block">
                       Vol: {volume}%
                     </span>
+                  </div>
+                </div>
+
+                {/* Real-time Display Status Live Report */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 text-left space-y-3 shadow-md">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white flex items-center space-x-2">
+                      <MonitorPlay className="w-4 h-4 text-emerald-400 animate-pulse" />
+                      <span>Laporan Langsung Koneksi Display ({displaysList.filter(d => getDisplayStatus(d.id).isOnline).length} Online)</span>
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-850 animate-pulse">
+                      🔴 LIVE UPDATE
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {displaysList.map((display) => {
+                      const status = getDisplayStatus(display.id);
+                      return (
+                        <div key={display.id} className="bg-slate-950/80 border border-slate-850/80 p-3 rounded-xl flex items-start space-x-3 hover:border-slate-800 transition-colors">
+                          <div className="mt-1">
+                            {status.isOnline ? (
+                              <span className="relative flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full h-2.5 w-2.5 bg-slate-600"></span>
+                            )}
+                          </div>
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <h5 className="text-[11px] font-bold text-slate-100 truncate">{display.name}</h5>
+                            </div>
+                            <p className="text-[10px] text-slate-500 font-mono truncate">{display.id}</p>
+                            <div className="flex items-center space-x-1.5 pt-1 text-[10px]">
+                              <span className={`px-1.5 py-0.5 rounded-md font-bold text-[9px] ${
+                                status.isOnline 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                                  : 'bg-slate-900 text-slate-500 border border-slate-850'
+                              }`}>
+                                {status.isOnline ? 'ONLINE' : 'OFFLINE'}
+                              </span>
+                              <span className="text-slate-500 text-[10px] font-mono">
+                                {status.isOnline ? 'Aktif' : 'Terakhir'}: {status.lastSeenText}
+                              </span>
+                            </div>
+                            {status.isOnline && (
+                              <div className="text-[9px] text-slate-400 bg-slate-900/60 p-1.5 rounded-lg border border-slate-900/80 mt-1 truncate">
+                                <span className="text-slate-500 font-semibold font-mono">Layout:</span> {PRESET_LAYOUTS.find(l => l.id === status.currentLayoutId)?.name || status.currentLayoutId || 'Default'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2677,15 +2763,43 @@ export default function AdminDashboard({
                               </div>
                             </div>
                           ) : (
-                            /* Mode Tampilan Biasa */
+                             /* Mode Tampilan Biasa */
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                               <div className="space-y-1 text-left">
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <h5 className="font-bold text-sm text-white">{display.name}</h5>
                                   <span className="font-mono text-[9px] text-slate-500 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-850">ID: {display.id}</span>
+                                  {(() => {
+                                    const status = getDisplayStatus(display.id);
+                                    return (
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] ${
+                                        status.isOnline 
+                                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                                          : 'bg-slate-900 text-slate-500 border border-slate-850'
+                                      }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${status.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                                        {status.isOnline ? 'ONLINE' : 'OFFLINE'}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                                 <p className="text-slate-400 text-xs">Lokasi: <span className="text-slate-200 font-semibold">{display.location}</span></p>
-                                <p className="text-[9px] text-slate-500 font-mono">Didaftarkan: {new Date(display.createdAt).toLocaleString('id-ID')}</p>
+                                {(() => {
+                                  const status = getDisplayStatus(display.id);
+                                  return (
+                                    <p className="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5 font-light">
+                                      <span>Didaftarkan: <strong className="font-normal text-slate-300">{new Date(display.createdAt).toLocaleDateString('id-ID')}</strong></span>
+                                      <span className="text-slate-700">•</span>
+                                      <span>{status.isOnline ? 'Aktif' : 'Terakhir dilihat'}: <strong className="font-mono text-cyan-400">{status.lastSeenText}</strong></span>
+                                      {status.isOnline && status.currentLayoutId && (
+                                        <>
+                                          <span className="text-slate-700">•</span>
+                                          <span>Layout: <strong className="font-normal text-slate-300">{PRESET_LAYOUTS.find(l => l.id === status.currentLayoutId)?.name || status.currentLayoutId}</strong></span>
+                                        </>
+                                      )}
+                                    </p>
+                                  );
+                                })()}
                               </div>
 
                               <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">

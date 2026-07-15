@@ -6,7 +6,7 @@ import SignageDisplay from './components/SignageDisplay';
 import AdminLogin from './components/AdminLogin';
 import DisplayLogin from './components/DisplayLogin';
 import { PRESET_LAYOUTS } from './initialData';
-import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, collection } from 'firebase/firestore';
 import { db } from './firebase';
 
 export default function App() {
@@ -18,6 +18,7 @@ export default function App() {
   // Admin selected display being configured
   const [selectedDisplayId, setSelectedDisplayId] = useState('global_state');
   const [displaysList, setDisplaysList] = useState<DisplayItem[]>([]);
+  const [displayStatuses, setDisplayStatuses] = useState<Record<string, any>>({});
   
   // Admin users state (Real-Time cross-device synchronization)
   const [adminUsersList, setAdminUsersList] = useState<AdminUser[]>([]);
@@ -119,6 +120,46 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // 2c. Subscribe to Display Status/Heartbeats (Real-Time live reports)
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'display_status'), (snapshot) => {
+      const statuses: Record<string, any> = {};
+      snapshot.forEach((doc) => {
+        statuses[doc.id] = doc.data();
+      });
+      setDisplayStatuses(statuses);
+    }, (error) => {
+      console.error("Error fetching display statuses:", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2d. Send Heartbeat when Standalone Display is Active & Logged In
+  useEffect(() => {
+    if (!isStandaloneDisplay || !isDisplayLoggedIn || !displayId) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        const statusRef = doc(db, 'display_status', displayId);
+        await setDoc(statusRef, {
+          displayId,
+          lastSeen: Date.now(),
+          status: 'online',
+          userAgent: navigator.userAgent,
+          currentLayoutId: state.currentLayoutId || 'default'
+        }, { merge: true });
+      } catch (err) {
+        console.error("Failed to send display heartbeat:", err);
+      }
+    };
+
+    // Send immediately on mount or status change
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 15000); // Heartbeat every 15 seconds
+
+    return () => clearInterval(interval);
+  }, [isStandaloneDisplay, isDisplayLoggedIn, displayId, state.currentLayoutId]);
 
   // 3. Subscribe to current active display state (Real-Time cross-device updates)
   const activeSubscriptionId = isStandaloneDisplay ? displayId : selectedDisplayId;
@@ -399,6 +440,7 @@ export default function App() {
       state={state} 
       onChange={handleStateChange}
       displaysList={displaysList}
+      displayStatuses={displayStatuses}
       selectedDisplayId={selectedDisplayId}
       onSelectDisplay={setSelectedDisplayId}
       onAddDisplay={handleAddDisplay}
