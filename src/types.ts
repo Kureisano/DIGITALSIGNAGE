@@ -80,6 +80,22 @@ export interface WeatherArea {
   iconNight: string;
 }
 
+export interface DisplayItem {
+  id: string;
+  name: string;
+  location: string;
+  createdAt: number;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  passwordHash: string; // Stored password (plain or hashed, we'll store simple passwords for easy management in this TV signage app)
+  fullName: string;
+  role: 'super_admin' | 'operator';
+  createdAt: number;
+}
+
 export interface SignageState {
   currentLayoutId: string;
   activeTVChannelId: string;

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { SignageState } from './types';
+import { SignageState, DisplayItem, AdminUser } from './types';
 import { INITIAL_SIGNAGE_STATE } from './initialData';
 import AdminDashboard from './components/AdminDashboard';
 import SignageDisplay from './components/SignageDisplay';
+import AdminLogin from './components/AdminLogin';
 import { PRESET_LAYOUTS } from './initialData';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
@@ -10,8 +11,30 @@ import { db } from './firebase';
 export default function App() {
   const [state, setState] = useState<SignageState>(INITIAL_SIGNAGE_STATE);
   const [isStandaloneDisplay, setIsStandaloneDisplay] = useState(false);
+  const [displayId, setDisplayId] = useState('global_state');
+  
+  // Admin selected display being configured
+  const [selectedDisplayId, setSelectedDisplayId] = useState('global_state');
+  const [displaysList, setDisplaysList] = useState<DisplayItem[]>([]);
+  
+  // Admin users state (Real-Time cross-device synchronization)
+  const [adminUsersList, setAdminUsersList] = useState<AdminUser[]>([]);
+  const [currentAdminUsername, setCurrentAdminUsername] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('signage_admin_username');
+    }
+    return null;
+  });
 
-  // 1. Detect Mode from Query Parameter (?mode=display)
+  // Authentication state
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('signage_admin_logged_in') === 'true';
+    }
+    return false;
+  });
+
+  // 1. Detect Mode from Query Parameter (?mode=display&displayId=...)
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.location) {
@@ -19,84 +42,233 @@ export default function App() {
         if (params.get('mode') === 'display') {
           setIsStandaloneDisplay(true);
         }
+        const queryDisplayId = params.get('displayId');
+        if (queryDisplayId) {
+          setDisplayId(queryDisplayId);
+          setSelectedDisplayId(queryDisplayId);
+        }
       }
     } catch (e) {
       console.warn("Unable to access window.location.search safely inside iframe:", e);
     }
   }, []);
 
-  // 2. Synchronize State in Real-Time across all devices via Firebase Firestore (with LocalStorage fallback)
+  // 2. Subscribe to Available Displays List (Cross-device and persistent in Cloud Firestore)
   useEffect(() => {
-    const docRef = doc(db, 'signage', 'global_state');
+    const displaysRef = doc(db, 'signage', 'displays_list');
     
-    // Listen to real-time updates from cloud Firestore
-    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+    const unsubscribe = onSnapshot(displaysRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data && Array.isArray(data.displays)) {
+          setDisplaysList(data.displays);
+        }
+      } else {
+        // First-time seed of physical displays
+        const INITIAL_DISPLAYS: DisplayItem[] = [
+          { id: 'global_state', name: 'Layar Utama (Lobi)', location: 'Lobby Utama Gedung', createdAt: Date.now() },
+          { id: 'display_cafeteria', name: 'Layar Kafe & Menu', location: 'Area Kafetaria Lantai Dasar', createdAt: Date.now() },
+          { id: 'display_office', name: 'Layar Informasi Kantor', location: 'Ruang Kerja Bersama Lantai 2', createdAt: Date.now() }
+        ];
+        setDoc(displaysRef, { displays: INITIAL_DISPLAYS })
+          .then(() => setDisplaysList(INITIAL_DISPLAYS))
+          .catch(err => console.error("Error seeding displays list:", err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 2b. Subscribe to Admin Users list (Cloud Firestore)
+  useEffect(() => {
+    const adminsRef = doc(db, 'signage', 'admins_list');
+    
+    const unsubscribe = onSnapshot(adminsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data && Array.isArray(data.admins)) {
+          setAdminUsersList(data.admins);
+        }
+      } else {
+        // Seed default super administrator
+        const INITIAL_ADMINS: AdminUser[] = [
+          {
+            id: 'admin_root',
+            username: 'admin',
+            passwordHash: 'admin', // Simple password storage for kiosk system
+            fullName: 'Administrator Utama',
+            role: 'super_admin',
+            createdAt: Date.now()
+          }
+        ];
+        setDoc(adminsRef, { admins: INITIAL_ADMINS })
+          .then(() => setAdminUsersList(INITIAL_ADMINS))
+          .catch(err => console.error("Error seeding admins list:", err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // 3. Subscribe to current active display state (Real-Time cross-device updates)
+  const activeSubscriptionId = isStandaloneDisplay ? displayId : selectedDisplayId;
+
+  useEffect(() => {
+    const docRef = doc(db, 'signage_displays', activeSubscriptionId);
+    
+    const unsubscribe = onSnapshot(docRef, async (snapshot) => {
       if (snapshot.exists()) {
         const cloudState = snapshot.data() as SignageState;
         setState(cloudState);
-        // Keep LocalStorage updated as local fallback
-        localStorage.setItem('signage_system_state', JSON.stringify(cloudState));
+        localStorage.setItem(`signage_state_${activeSubscriptionId}`, JSON.stringify(cloudState));
       } else {
-        // Document doesn't exist yet, seed it with the initial state in the database
-        setDoc(docRef, INITIAL_SIGNAGE_STATE)
-          .catch(err => console.error("Error seeding initial Firestore state:", err));
+        // Document doesn't exist yet, seed it
+        try {
+          if (activeSubscriptionId === 'global_state') {
+            // Backward compatibility lookup
+            const oldRef = doc(db, 'signage', 'global_state');
+            onSnapshot(oldRef, (oldSnapshot) => {
+              if (oldSnapshot.exists()) {
+                const oldData = oldSnapshot.data() as SignageState;
+                setState(oldData);
+                setDoc(docRef, oldData);
+              } else {
+                setDoc(docRef, INITIAL_SIGNAGE_STATE);
+              }
+            });
+          } else {
+            await setDoc(docRef, INITIAL_SIGNAGE_STATE);
+          }
+        } catch (err) {
+          console.error("Error initializing display document:", err);
+        }
       }
     }, (error) => {
-      console.warn("Firestore subscription failed or blocked, falling back to LocalStorage:", error);
-      
-      // Offline fallback: Use traditional LocalStorage sync
-      const LOCAL_STORAGE_KEY = 'signage_system_state';
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      console.warn(`Firestore display '${activeSubscriptionId}' failed, falling back to local storage:`, error);
+      const saved = localStorage.getItem(`signage_state_${activeSubscriptionId}`);
       if (saved) {
         try {
           setState(JSON.parse(saved));
         } catch (e) {
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_SIGNAGE_STATE));
+          setState(INITIAL_SIGNAGE_STATE);
         }
       } else {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_SIGNAGE_STATE));
+        setState(INITIAL_SIGNAGE_STATE);
       }
     });
 
-    // Local cross-tab storage fallback for offline use
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'signage_system_state' && e.newValue) {
-        try {
-          setState(JSON.parse(e.newValue));
-        } catch (err) {
-          console.error('Failed to parse storage fallback state', err);
-        }
-      }
-    };
+    return () => unsubscribe();
+  }, [activeSubscriptionId]);
 
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      unsubscribe();
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
-
-  // 3. State update propagation function (Writes to Firestore for instant cross-device updates)
+  // 4. State update propagation (Writes to Firestore for instant display updates)
   const handleStateChange = async (newState: SignageState) => {
     setState(newState);
-    localStorage.setItem('signage_system_state', JSON.stringify(newState));
+    localStorage.setItem(`signage_state_${activeSubscriptionId}`, JSON.stringify(newState));
     
     try {
-      const docRef = doc(db, 'signage', 'global_state');
+      const docRef = doc(db, 'signage_displays', activeSubscriptionId);
       await setDoc(docRef, newState);
+      
+      // Mirror to old global_state if needed to prevent breaking legacy systems
+      if (activeSubscriptionId === 'global_state') {
+        await setDoc(doc(db, 'signage', 'global_state'), newState);
+      }
     } catch (err) {
       console.error("Failed to sync updated state to Firestore:", err);
     }
   };
 
-  // 4. Standalone Fullscreen Display Mode
+  // 5. Multi-Display Management Actions
+  const handleAddDisplay = async (newDisplay: DisplayItem) => {
+    const updated = [...displaysList, newDisplay];
+    setDisplaysList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
+      // Initialize state for the new display
+      await setDoc(doc(db, 'signage_displays', newDisplay.id), INITIAL_SIGNAGE_STATE);
+    } catch (err) {
+      console.error("Failed to add display in Firestore:", err);
+    }
+  };
+
+  const handleEditDisplay = async (updatedDisplay: DisplayItem) => {
+    const updated = displaysList.map(d => d.id === updatedDisplay.id ? updatedDisplay : d);
+    setDisplaysList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
+    } catch (err) {
+      console.error("Failed to update display metadata in Firestore:", err);
+    }
+  };
+
+  const handleDeleteDisplay = async (idToDelete: string) => {
+    if (idToDelete === 'global_state') return;
+    const updated = displaysList.filter(d => d.id !== idToDelete);
+    setDisplaysList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
+      // If deleted was currently configured, fallback to default
+      if (selectedDisplayId === idToDelete) {
+        setSelectedDisplayId('global_state');
+      }
+    } catch (err) {
+      console.error("Failed to delete display in Firestore:", err);
+    }
+  };
+
+  // 5b. Admin Users Management Actions
+  const handleAddAdmin = async (newAdmin: AdminUser) => {
+    const updated = [...adminUsersList, newAdmin];
+    setAdminUsersList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
+    } catch (err) {
+      console.error("Failed to add admin user to Firestore:", err);
+    }
+  };
+
+  const handleEditAdmin = async (updatedAdmin: AdminUser) => {
+    const updated = adminUsersList.map(u => u.id === updatedAdmin.id ? updatedAdmin : u);
+    setAdminUsersList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
+    } catch (err) {
+      console.error("Failed to update admin user in Firestore:", err);
+    }
+  };
+
+  const handleDeleteAdmin = async (idToDelete: string) => {
+    if (idToDelete === 'admin_root') return;
+    const updated = adminUsersList.filter(u => u.id !== idToDelete);
+    setAdminUsersList(updated);
+    try {
+      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
+    } catch (err) {
+      console.error("Failed to delete admin user in Firestore:", err);
+    }
+  };
+
+  const handleLoginSuccess = (username: string) => {
+    localStorage.setItem('signage_admin_logged_in', 'true');
+    localStorage.setItem('signage_admin_username', username);
+    setCurrentAdminUsername(username);
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('signage_admin_logged_in');
+    localStorage.removeItem('signage_admin_username');
+    setCurrentAdminUsername(null);
+    setIsLoggedIn(false);
+  };
+
+  // 6. Standalone TV Display Rendering Mode
   if (isStandaloneDisplay) {
     const layoutsList = state.layouts || PRESET_LAYOUTS;
     const activeLayout = layoutsList.find((l) => l.id === state.currentLayoutId) || layoutsList[0];
     
     return (
       <div className="w-screen h-screen overflow-hidden bg-black flex items-center justify-center">
-        {/* Full View TV Signage with no margins/paddings */}
         <div className="w-full h-full">
           <SignageDisplay state={state} layout={activeLayout} previewMode={false} onChange={handleStateChange} />
         </div>
@@ -104,11 +276,42 @@ export default function App() {
     );
   }
 
-  // 5. Normal Admin Dashboard Mode with inline Preview Monitor
+  // 7. Security Admin Access Gate
+  if (!isLoggedIn) {
+    return (
+      <AdminLogin 
+        onLoginSuccess={handleLoginSuccess} 
+        adminUsers={adminUsersList} 
+      />
+    );
+  }
+
+  // Find currently logged-in user object details
+  const activeCurrentUser = adminUsersList.find(u => u.username === currentAdminUsername) || {
+    id: 'admin_root',
+    username: currentAdminUsername || 'admin',
+    fullName: 'Administrator',
+    role: 'super_admin' as const,
+    createdAt: Date.now()
+  };
+
+  // 8. Logged-in Administrator Dashboard Panel
   return (
     <AdminDashboard 
       state={state} 
-      onChange={handleStateChange} 
+      onChange={handleStateChange}
+      displaysList={displaysList}
+      selectedDisplayId={selectedDisplayId}
+      onSelectDisplay={setSelectedDisplayId}
+      onAddDisplay={handleAddDisplay}
+      onEditDisplay={handleEditDisplay}
+      onDeleteDisplay={handleDeleteDisplay}
+      onLogout={handleLogout}
+      adminUsers={adminUsersList}
+      currentUser={activeCurrentUser}
+      onAddAdmin={handleAddAdmin}
+      onEditAdmin={handleEditAdmin}
+      onDeleteAdmin={handleDeleteAdmin}
     />
   );
 }

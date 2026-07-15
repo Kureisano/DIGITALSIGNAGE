@@ -1,16 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { SignageState, LayoutConfig, TVChannel, CCTVCamera, Promotion, TickerConfig, LayoutMode, DisplayOrientation } from '../types';
+import { SignageState, LayoutConfig, TVChannel, CCTVCamera, Promotion, TickerConfig, LayoutMode, DisplayOrientation, DisplayItem, AdminUser } from '../types';
 import { PRESET_LAYOUTS, PRESET_CHANNELS, PRESET_CCTVS, PRESET_PROMOS, DEFAULT_TICKER } from '../initialData';
 import SignageDisplay from './SignageDisplay';
 import { 
   Tv, Shield, Calendar, Sliders, Play, Plus, Trash2, Edit, ExternalLink, Sparkles, 
   Clock, RefreshCw, Volume2, LayoutGrid, Check, AlertCircle, Sun, Info, HeartPulse, 
-  HelpCircle, Eye, MonitorPlay, CheckCircle2, ChevronRight, Minimize2, Maximize2, Loader2
+  HelpCircle, Eye, MonitorPlay, CheckCircle2, ChevronRight, Minimize2, Maximize2, Loader2,
+  LogOut, Monitor, Copy, Users, UserPlus, Key, UserCheck
 } from 'lucide-react';
 
 interface AdminDashboardProps {
   state: SignageState;
   onChange: (newState: SignageState) => void;
+  displaysList: DisplayItem[];
+  selectedDisplayId: string;
+  onSelectDisplay: (id: string) => void;
+  onAddDisplay: (display: DisplayItem) => void;
+  onEditDisplay: (display: DisplayItem) => void;
+  onDeleteDisplay: (id: string) => void;
+  onLogout: () => void;
+  adminUsers?: AdminUser[];
+  currentUser?: AdminUser;
+  onAddAdmin?: (admin: AdminUser) => void;
+  onEditAdmin?: (admin: AdminUser) => void;
+  onDeleteAdmin?: (id: string) => void;
 }
 
 const PRESET_IMAGES = [
@@ -22,7 +35,22 @@ const PRESET_IMAGES = [
   { label: '🛍️ Fashion Store', url: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800' }
 ];
 
-export default function AdminDashboard({ state, onChange }: AdminDashboardProps) {
+export default function AdminDashboard({ 
+  state, 
+  onChange,
+  displaysList = [],
+  selectedDisplayId = 'global_state',
+  onSelectDisplay,
+  onAddDisplay,
+  onEditDisplay,
+  onDeleteDisplay,
+  onLogout,
+  adminUsers = [],
+  currentUser = { id: 'admin_root', username: 'admin', passwordHash: 'admin', fullName: 'Administrator', role: 'super_admin', createdAt: Date.now() },
+  onAddAdmin = () => {},
+  onEditAdmin = () => {},
+  onDeleteAdmin = () => {}
+}: AdminDashboardProps) {
   const { 
     currentLayoutId, 
     activeTVChannelId, 
@@ -234,7 +262,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
     : simulatedTime;
 
   // Active admin section
-  const [activeTab, setActiveTab] = useState<'overview' | 'layouts' | 'weather' | 'promos' | 'tv' | 'cctv' | 'ticker'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'layouts' | 'weather' | 'promos' | 'tv' | 'cctv' | 'ticker' | 'displays' | 'users'>('overview');
 
   // Preview options
   const [previewZoom, setPreviewZoom] = useState<number>(100);
@@ -242,6 +270,28 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
   const [timelineHour, setTimelineHour] = useState<number>(12);
   const [timelineMin, setTimelineMin] = useState<number>(0);
   const [adminTicker, setAdminTicker] = useState<number>(0);
+
+  // Display management state
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingDisplayId, setEditingDisplayId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newLocation, setNewLocation] = useState('');
+  const [newId, setNewId] = useState('');
+  const [displayError, setDisplayError] = useState('');
+
+  // Admin user management state
+  const [newAdminUsername, setNewAdminUsername] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [newAdminFullName, setNewAdminFullName] = useState('');
+  const [newAdminRole, setNewAdminRole] = useState<'super_admin' | 'operator'>('operator');
+  const [editingAdminId, setEditingAdminId] = useState<string | null>(null);
+  const [editAdminFullName, setEditAdminFullName] = useState('');
+  const [editAdminPassword, setEditAdminPassword] = useState('');
+  const [editAdminRole, setEditAdminRole] = useState<'super_admin' | 'operator'>('operator');
+  const [adminError, setAdminError] = useState('');
+  const [adminSuccess, setAdminSuccess] = useState('');
 
   // 1-second timer to update countdown display live on the admin list
   useEffect(() => {
@@ -505,7 +555,7 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
 
   // Open standalone view in a new tab
   const handleLaunchStandalone = () => {
-    window.open('?mode=display', '_blank', 'noopener,noreferrer');
+    window.open(`?mode=display&displayId=${selectedDisplayId}`, '_blank', 'noopener,noreferrer');
   };
 
   // Quick preset generators for demonstrating scheduler
@@ -556,40 +606,71 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* 1. Header Navigation Bar */}
-      <header className="border-b border-slate-800 bg-slate-950/60 backdrop-blur-md sticky top-0 z-30 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div className="flex items-center space-x-3 select-none">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-600 to-pink-500 flex items-center justify-center text-white shadow-[0_0_15px_rgba(99,102,241,0.3)]">
-            <Tv className="w-5.5 h-5.5 animate-pulse" />
+      <header className="border-b border-slate-800 bg-slate-950/60 backdrop-blur-md sticky top-0 z-30 px-6 py-4 flex flex-col xl:flex-row justify-between items-center gap-4">
+        <div className="flex flex-col md:flex-row items-center gap-4 w-full xl:w-auto justify-between md:justify-start">
+          <div className="flex items-center space-x-3 select-none">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-600 to-pink-500 flex items-center justify-center text-white shadow-[0_0_15px_rgba(99,102,241,0.3)]">
+              <Tv className="w-5.5 h-5.5 animate-pulse" />
+            </div>
+            <div className="text-left">
+              <h1 className="text-base font-display font-black tracking-tight text-white flex items-center">
+                SignageStudio <span className="text-indigo-400 font-mono text-[9px] ml-1.5 px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 tracking-wider">PRO</span>
+              </h1>
+              <p className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">DIGITAL MEDIA SIGNAGE CONTROL & MONITOR</p>
+            </div>
           </div>
-          <div className="text-left">
-            <h1 className="text-base font-display font-black tracking-tight text-white flex items-center">
-              SignageStudio <span className="text-indigo-400 font-mono text-[9px] ml-1.5 px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 tracking-wider">PRO</span>
-            </h1>
-            <p className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">DIGITAL MEDIA SIGNAGE CONTROL & MONITOR</p>
+
+          <span className="hidden md:inline text-slate-800 text-lg">/</span>
+
+          {/* SCREEN DROPDOWN SELECTOR */}
+          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-xl text-xs w-full md:w-auto">
+            <span className="text-slate-400 font-mono text-[10px] uppercase">Mengelola Layar:</span>
+            <select
+              value={selectedDisplayId}
+              onChange={(e) => onSelectDisplay(e.target.value)}
+              className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer pr-4"
+            >
+              {displaysList.map((display) => (
+                <option key={display.id} value={display.id} className="bg-slate-900 text-white">
+                  {display.name} ({display.location})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Dashboard Real-Time System Health Bar */}
-        <div className="flex items-center gap-3 bg-slate-900/50 border border-slate-800/80 px-4 py-2 rounded-xl">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            <span className="text-xs font-semibold text-slate-200">System Live</span>
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-end">
+          {/* Dashboard Real-Time System Health Bar */}
+          <div className="flex items-center gap-3 bg-slate-900/50 border border-slate-800/80 px-4 py-2 rounded-xl">
+            <div className="flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span className="text-xs font-semibold text-slate-200">System Live</span>
+            </div>
+            <span className="text-slate-800">|</span>
+            <div className="text-xs text-slate-400 font-mono">
+              Mode: <span className="text-indigo-400 font-bold">{useSystemTime ? 'SYS' : 'SIMULASI'}</span> • <span className="text-slate-200 font-bold">{timelineHour.toString().padStart(2, '0')}:{timelineMin.toString().padStart(2, '0')}</span>
+            </div>
           </div>
-          <span className="text-slate-800">|</span>
-          <div className="text-xs text-slate-400 font-mono">
-            Mode: <span className="text-indigo-400 font-bold">{useSystemTime ? 'SYS' : 'SIMULASI'}</span> • <span className="text-slate-200 font-bold">{timelineHour.toString().padStart(2, '0')}:{timelineMin.toString().padStart(2, '0')}</span>
-          </div>
-        </div>
 
-        {/* Launcher Button */}
-        <button
-          onClick={handleLaunchStandalone}
-          className="w-full md:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 transition-all text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-500/10 border border-indigo-500/20 cursor-pointer"
-        >
-          <MonitorPlay className="w-4 h-4" />
-          <span>Launch TV Display (Tab Baru)</span>
-          <ExternalLink className="w-3 h-3 ml-0.5" />
-        </button>
+          {/* Launcher Button */}
+          <button
+            onClick={handleLaunchStandalone}
+            className="flex items-center justify-center space-x-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 active:scale-95 transition-all text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-500/10 border border-indigo-500/20 cursor-pointer"
+          >
+            <MonitorPlay className="w-4 h-4" />
+            <span>Launch TV Display</span>
+            <ExternalLink className="w-3 h-3 ml-0.5" />
+          </button>
+
+          {/* Secure Logout Button */}
+          <button
+            onClick={onLogout}
+            title="Keluar dari Admin Panel"
+            className="flex items-center justify-center bg-slate-900 hover:bg-rose-950/30 border border-slate-800 hover:border-rose-900/50 text-slate-400 hover:text-rose-400 p-2.5 rounded-xl transition-all active:scale-95 cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {/* 2. Main content area: Split Sidebar controls vs Signage Display Preview */}
@@ -602,6 +683,8 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
           <nav className="flex flex-wrap border-b border-slate-800 bg-slate-900/10 p-2 gap-1.5 sticky top-0 z-10 backdrop-blur-md">
             {[
               { id: 'overview', label: 'Ringkasan', icon: <Sliders className="w-4 h-4" /> },
+              { id: 'displays', label: 'Manajemen Layar', icon: <Monitor className="w-4 h-4" /> },
+              { id: 'users', label: 'Kelola Admin', icon: <Users className="w-4 h-4" /> },
               { id: 'layouts', label: 'Studio Layout', icon: <LayoutGrid className="w-4 h-4" /> },
               { id: 'weather', label: 'Cuaca & Tema', icon: <Sun className="w-4 h-4" /> },
               { id: 'promos', label: 'Jadwal Promo', icon: <Calendar className="w-4 h-4" /> },
@@ -1625,8 +1708,8 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
               <div className="space-y-6 text-left">
                 <div className="flex justify-between items-center">
                   <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Konfigurasi Siaran TV</h3>
-                    <p className="text-slate-400 text-xs mt-1">Atur sumber siaran berita, video dekorasi, atau channel music live.</p>
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Konfigurasi Siaran TV & IPTV</h3>
+                    <p className="text-slate-400 text-xs mt-1">Atur sumber siaran berita, video dekorasi, atau saluran streaming IPTV live.</p>
                   </div>
                   {!showTVForm && (
                     <button
@@ -1644,9 +1727,65 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                       className="flex items-center space-x-1 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>Tambah Channel</span>
+                      <span>Tambah IPTV / Channel</span>
                     </button>
                   )}
+                </div>
+
+                {/* DISPLAY SELECTOR FOR TARGET BROADCAST */}
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-3.5">
+                  <div className="flex items-center space-x-2">
+                    <Monitor className="w-4.5 h-4.5 text-indigo-400" />
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">🎯 Target Layar TV Signage</h4>
+                  </div>
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Setiap layar monitor TV yang terhubung dapat memutar siaran TV atau stream IPTV yang berbeda-beda. Pilih layar target di bawah untuk memprogram saluran siaran khusus pada layar tersebut secara langsung (real-time).
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                    {displaysList.map((display) => {
+                      const isActiveTarget = display.id === selectedDisplayId;
+                      return (
+                        <div
+                          key={display.id}
+                          onClick={() => onSelectDisplay(display.id)}
+                          className={`p-4 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                            isActiveTarget 
+                              ? 'bg-indigo-600/10 border-indigo-500/80 shadow-md shadow-indigo-600/5' 
+                              : 'bg-slate-950 border-slate-850 hover:bg-slate-900 hover:border-slate-700'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-wider">
+                                {display.id === 'global_state' ? 'Layar Utama' : 'Layar Standalone'}
+                              </span>
+                              {isActiveTarget && (
+                                <span className="text-[9px] font-mono font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full uppercase tracking-widest animate-pulse">
+                                  Dikonfigurasi
+                                </span>
+                              )}
+                            </div>
+                            <h5 className="text-xs font-bold text-white mt-1.5">{display.name}</h5>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{display.location}</p>
+                          </div>
+                          
+                          <div className="mt-3.5 pt-2.5 border-t border-slate-850/60 flex justify-between items-center text-[10px] font-mono">
+                            <span className="text-slate-500">Saluran Aktif:</span>
+                            {isActiveTarget ? (
+                              <span className="text-emerald-400 font-bold truncate max-w-[130px]" title={channelsList.find(c => c.id === activeTVChannelId)?.name}>
+                                🟢 {channelsList.find(c => c.id === activeTVChannelId)?.name.split(' (')[0] || 'Ambient Lofi'}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 hover:text-indigo-400 font-semibold transition-colors flex items-center gap-1">
+                                Kelola siaran ⚡
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {showTVForm && (
@@ -1699,16 +1838,24 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                       </div>
 
                       {!tvForm.isSimulated && (
-                        <div>
-                          <label className="block text-[9px] font-mono text-slate-400 uppercase tracking-widest font-bold">Video Stream URL (.mp4)</label>
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <label className="block text-[9px] font-mono text-slate-400 uppercase tracking-widest font-bold">Video / IPTV Stream URL (HLS .m3u8, .mp4, YouTube)</label>
+                            <span className="text-[9px] font-mono font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              📡 IPTV Live Aktif
+                            </span>
+                          </div>
                           <input
                             type="url"
                             required={!tvForm.isSimulated}
                             value={tvForm.videoUrl || ''}
                             onChange={(e) => setTVForm({ ...tvForm, videoUrl: e.target.value })}
-                            placeholder="https://assets.mixkit.co/videos/preview/mixkit-..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mt-1.5 focus:border-indigo-500 focus:outline-none"
+                            placeholder="Contoh: http://domain.com/live/stream.m3u8 atau link video MP4/YouTube"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none"
                           />
+                          <p className="text-[10px] text-slate-500 leading-normal font-light">
+                            Masukkan link stream IPTV berformat <span className="text-indigo-400 font-bold font-mono">.m3u8 (HLS)</span>, link video <span className="text-indigo-400 font-bold font-mono">.mp4</span> standar, atau link siaran langsung <span className="text-indigo-400 font-bold font-mono">YouTube / YouTube Live</span>. Sistem kami otomatis mengintegrasikan pemutar IPTV modern yang andal secara realtime di setiap layar.
+                          </p>
                         </div>
                       )}
 
@@ -1798,7 +1945,14 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                              <div>
                                <h4 className="text-xs font-display font-extrabold text-white tracking-tight leading-tight">{ch.name}</h4>
                                <p className="text-[10px] text-slate-400 font-mono mt-1 font-light">
-                                 {ch.isSimulated ? 'AMBIENT ANIMATED' : 'LIVE MP4 STREAM'}
+                                 {ch.isSimulated 
+                                    ? 'AMBIENT ANIMATED' 
+                                    : (ch.videoUrl || '').includes('.m3u8')
+                                    ? '📡 IPTV LIVE (.m3u8)'
+                                    : (ch.videoUrl || '').includes('youtube.com') || (ch.videoUrl || '').includes('youtu.be')
+                                    ? '📺 YOUTUBE LIVE'
+                                    : '🎥 MP4 STREAM'
+                                  }
                                </p>
                              </div>
                              <span className="text-[9px] font-mono font-bold uppercase bg-slate-900 px-2.5 py-1 rounded-full text-slate-400 border border-slate-800">
@@ -2197,6 +2351,591 @@ export default function AdminDashboard({ state, onChange }: AdminDashboardProps)
                         })}
                       </div>
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: MULTI-DISPLAY MANAGEMENT */}
+            {activeTab === 'displays' && (
+              <div className="space-y-6 text-left">
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Manajemen Multi-Layar (Displays)</h3>
+                  <p className="text-slate-400 text-xs mt-1">
+                    Hubungkan dan sinkronkan beberapa display TV signage secara real-time. Setiap layar memiliki kontrol layout, promo, dan live feed masing-masing.
+                  </p>
+                </div>
+
+                {/* Form Tambah Layar Baru */}
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Tambah Layar Baru</h4>
+                  {displayError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-xl">
+                      {displayError}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">ID Layar (Hanya huruf, angka, _)</label>
+                      <input
+                        type="text"
+                        value={newId}
+                        onChange={(e) => setNewId(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                        placeholder="contoh: display_lobi_dua"
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Nama Layar</label>
+                      <input
+                        type="text"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="contoh: Layar Utama Barat"
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Lokasi Penempatan</label>
+                      <input
+                        type="text"
+                        value={newLocation}
+                        onChange={(e) => setNewLocation(e.target.value)}
+                        placeholder="contoh: Lantai 1 Koridor"
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDisplayError('');
+                        if (!newId.trim() || !newName.trim() || !newLocation.trim()) {
+                          setDisplayError('Seluruh kolom wajib diisi untuk mendaftarkan layar baru.');
+                          return;
+                        }
+                        if (displaysList.some(d => d.id === newId)) {
+                          setDisplayError('ID Layar ini sudah digunakan oleh layar lain.');
+                          return;
+                        }
+                        onAddDisplay({
+                          id: newId,
+                          name: newName,
+                          location: newLocation,
+                          createdAt: Date.now()
+                        });
+                        setNewId('');
+                        setNewName('');
+                        setNewLocation('');
+                      }}
+                      className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs px-4 py-2.5 rounded-xl border border-indigo-500/20 shadow-lg shadow-indigo-500/10 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Daftarkan Layar Baru</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Grid List Layar Terdaftar */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Daftar Layar Aktif ({displaysList.length})</h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {displaysList.map((display) => {
+                      const isCurrentlyConfiguring = selectedDisplayId === display.id;
+                      const isEditing = editingDisplayId === display.id;
+                      const tvUrl = `${window.location.origin}${window.location.pathname}?mode=display&displayId=${display.id}`;
+
+                      return (
+                        <div
+                          key={display.id}
+                          className={`border rounded-2xl p-5 transition-all relative overflow-hidden ${
+                            isCurrentlyConfiguring
+                              ? 'bg-slate-900/30 border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.05)]'
+                              : 'bg-slate-900/10 border-slate-800'
+                          }`}
+                        >
+                          {/* Indicator badge for active managed screen */}
+                          {isCurrentlyConfiguring && (
+                            <div className="absolute top-0 right-0 bg-indigo-600/10 border-l border-b border-indigo-500/20 text-indigo-400 font-mono text-[9px] font-bold px-3 py-1 rounded-bl-xl tracking-widest uppercase animate-pulse">
+                              🟢 Sedang Dikelola
+                            </div>
+                          )}
+
+                          {isEditing ? (
+                            /* Mode Edit Inline */
+                            <div className="space-y-4 text-left">
+                              <h5 className="text-xs font-bold text-indigo-400">Edit Detail Layar: {display.id}</h5>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-mono text-slate-400 uppercase">Nama Layar</label>
+                                  <input
+                                    type="text"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-mono text-slate-400 uppercase">Lokasi Penempatan</label>
+                                  <input
+                                    type="text"
+                                    value={editLocation}
+                                    onChange={(e) => setEditLocation(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingDisplayId(null)}
+                                  className="px-3.5 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 font-semibold cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!editName.trim() || !editLocation.trim()) return;
+                                    onEditDisplay({
+                                      ...display,
+                                      name: editName,
+                                      location: editLocation
+                                    });
+                                    setEditingDisplayId(null);
+                                  }}
+                                  className="px-3.5 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 font-bold text-white cursor-pointer"
+                                >
+                                  Simpan Perubahan
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Mode Tampilan Biasa */
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                              <div className="space-y-1 text-left">
+                                <div className="flex items-center gap-2">
+                                  <h5 className="font-bold text-sm text-white">{display.name}</h5>
+                                  <span className="font-mono text-[9px] text-slate-500 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-850">ID: {display.id}</span>
+                                </div>
+                                <p className="text-slate-400 text-xs">Lokasi: <span className="text-slate-200 font-semibold">{display.location}</span></p>
+                                <p className="text-[9px] text-slate-500 font-mono">Didaftarkan: {new Date(display.createdAt).toLocaleString('id-ID')}</p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+                                {/* Button Kelola Layar */}
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectDisplay(display.id)}
+                                  disabled={isCurrentlyConfiguring}
+                                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    isCurrentlyConfiguring
+                                      ? 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 cursor-default'
+                                      : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/5'
+                                  }`}
+                                >
+                                  {isCurrentlyConfiguring ? 'Sedang Dikelola' : 'Kelola Layar Ini'}
+                                </button>
+
+                                {/* Button Salin URL TV */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(tvUrl);
+                                    setCopiedId(display.id);
+                                    setTimeout(() => setCopiedId(null), 1500);
+                                  }}
+                                  className="flex items-center space-x-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 px-3.5 py-2 rounded-xl text-xs transition-all cursor-pointer"
+                                >
+                                  {copiedId === display.id ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span className="text-emerald-400 font-semibold">Tersalin!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5" />
+                                      <span>Salin URL TV</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {/* Button Edit Layar */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingDisplayId(display.id);
+                                    setEditName(display.name);
+                                    setEditLocation(display.location);
+                                  }}
+                                  className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-850 text-slate-400 hover:text-slate-200 rounded-xl transition-all cursor-pointer"
+                                  title="Edit detail layar"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+
+                                {/* Button Hapus Layar */}
+                                <button
+                                  type="button"
+                                  disabled={display.id === 'global_state'}
+                                  onClick={() => {
+                                    if (confirm(`Apakah Anda yakin ingin menghapus display '${display.name}'?`)) {
+                                      onDeleteDisplay(display.id);
+                                    }
+                                  }}
+                                  className="p-2 bg-slate-900 hover:bg-rose-950/20 border border-slate-850 hover:border-rose-900/30 text-slate-500 hover:text-rose-400 rounded-xl transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-slate-900 disabled:hover:border-slate-850 disabled:hover:text-slate-500"
+                                  title={display.id === 'global_state' ? 'Layar default tidak dapat dihapus' : 'Hapus layar'}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Quick Info Box on TV URL */}
+                          {!isEditing && (
+                            <div className="mt-4 border-t border-slate-800/60 pt-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                              <span className="text-[10px] text-slate-500 font-mono tracking-wide truncate max-w-full block">
+                                URL Display: <span className="text-slate-400 selection:bg-indigo-500/20">{tvUrl}</span>
+                              </span>
+                              <a
+                                href={tvUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                              >
+                                <span>Buka Layar TV</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: USER MANAGEMENT (MANAJEMEN USER PENGELOLA ADMIN) */}
+            {activeTab === 'users' && (
+              <div className="space-y-6 text-left">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Manajemen User Pengelola Admin</h3>
+                    <p className="text-slate-400 text-xs mt-1">
+                      Daftarkan, sunting, dan hapus akun administrator pengelola TV signage Anda. Disinkronkan secara real-time di cloud database.
+                    </p>
+                  </div>
+                  
+                  {/* Current Active User Status Indicator */}
+                  <div className="flex items-center gap-2.5 bg-indigo-500/10 border border-indigo-500/25 px-4 py-2 rounded-2xl">
+                    <UserCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <div className="text-left">
+                      <p className="text-[9px] font-mono text-slate-400 uppercase tracking-widest leading-none">Login Aktif Sebagai</p>
+                      <p className="text-xs font-bold text-white mt-0.5">{currentUser.fullName} <span className="text-[10px] text-indigo-400 font-mono">({currentUser.role === 'super_admin' ? 'Super Admin' : 'Operator'})</span></p>
+                    </div>
+                  </div>
+                </div>
+
+                {adminError && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3.5 rounded-xl flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>{adminError}</span>
+                  </div>
+                )}
+
+                {adminSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs p-3.5 rounded-xl flex items-center gap-2 animate-pulse">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>{adminSuccess}</span>
+                  </div>
+                )}
+
+                {/* Form Tambah Admin (Hanya bisa diakses oleh Super Admin) */}
+                {currentUser.role === 'super_admin' ? (
+                  <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <UserPlus className="w-4.5 h-4.5 text-indigo-400" />
+                      <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Registrasi Admin Pengelola Baru</h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Full Name */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Nama Lengkap</label>
+                        <input
+                          type="text"
+                          value={newAdminFullName}
+                          onChange={(e) => setNewAdminFullName(e.target.value)}
+                          placeholder="contoh: Budi Setiawan"
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                        />
+                      </div>
+
+                      {/* Username */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Username (Hanya huruf/angka)</label>
+                        <input
+                          type="text"
+                          value={newAdminUsername}
+                          onChange={(e) => setNewAdminUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                          placeholder="contoh: budi_admin"
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                        />
+                      </div>
+
+                      {/* Password */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Password</label>
+                        <input
+                          type="text"
+                          value={newAdminPassword}
+                          onChange={(e) => setNewAdminPassword(e.target.value)}
+                          placeholder="Min 4 karakter"
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none transition-colors"
+                        />
+                      </div>
+
+                      {/* Role selection */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest block">Hak Akses (Role)</label>
+                        <select
+                          value={newAdminRole}
+                          onChange={(e) => setNewAdminRole(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none transition-colors cursor-pointer"
+                        >
+                          <option value="operator">Operator (Mengeola Konten TV)</option>
+                          <option value="super_admin">Super Admin (Hak Akses Penuh)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminError('');
+                          setAdminSuccess('');
+
+                          if (!newAdminFullName.trim() || !newAdminUsername.trim() || !newAdminPassword.trim()) {
+                            setAdminError('Semua kolom registrasi wajib diisi.');
+                            return;
+                          }
+
+                          if (newAdminPassword.length < 4) {
+                            setAdminError('Password harus minimal berisi 4 karakter.');
+                            return;
+                          }
+
+                          const lowercaseUsername = newAdminUsername.toLowerCase().trim();
+                          if (adminUsers.some(u => u.username.toLowerCase() === lowercaseUsername)) {
+                            setAdminError('Username tersebut sudah terdaftar.');
+                            return;
+                          }
+
+                          // Register new admin
+                          onAddAdmin({
+                            id: `admin_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                            username: lowercaseUsername,
+                            passwordHash: newAdminPassword,
+                            fullName: newAdminFullName.trim(),
+                            role: newAdminRole,
+                            createdAt: Date.now()
+                          });
+
+                          setAdminSuccess(`Akun administrator '${newAdminFullName}' berhasil didaftarkan.`);
+                          setNewAdminFullName('');
+                          setNewAdminUsername('');
+                          setNewAdminPassword('');
+                          setNewAdminRole('operator');
+                        }}
+                        className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs px-4 py-2.5 rounded-xl border border-indigo-500/20 shadow-lg shadow-indigo-500/10 transition-all cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Daftarkan Admin Baru</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Operator Info Alert */
+                  <div className="bg-slate-900/30 border border-slate-850 rounded-2xl p-4 flex gap-3 text-slate-400 text-xs leading-relaxed">
+                    <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-slate-200">Mode View-Only Teraktifkan</p>
+                      <p className="mt-0.5 text-slate-400">Akun Anda berpangkat <span className="text-indigo-400 font-bold">Operator</span>. Pendaftaran dan modifikasi akun admin lainnya dibatasi dan hanya dapat dilakukan oleh akun berlevel <span className="text-white font-bold">Super Admin</span>.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* List of Registered Admin Users */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Daftar Admin Terdaftar ({adminUsers.length > 0 ? adminUsers.length : 1})</h4>
+
+                  <div className="grid grid-cols-1 gap-3.5">
+                    {/* Fallback rendering if list is completely empty */}
+                    {adminUsers.length === 0 && (
+                      <div className="border border-dashed border-slate-800 rounded-2xl p-6 text-center text-xs text-slate-500">
+                        Memuat data administrator...
+                      </div>
+                    )}
+
+                    {adminUsers.map((user) => {
+                      const isCurrentUser = user.username === currentUser.username;
+                      const isEditing = editingAdminId === user.id;
+
+                      return (
+                        <div
+                          key={user.id}
+                          className={`border rounded-2xl p-5 transition-all relative overflow-hidden ${
+                            isCurrentUser
+                              ? 'bg-indigo-950/10 border-indigo-500/25'
+                              : 'bg-slate-900/10 border-slate-800/80'
+                          }`}
+                        >
+                          {/* Account match badge */}
+                          {isCurrentUser && (
+                            <div className="absolute top-0 right-0 bg-indigo-500/10 border-l border-b border-indigo-500/25 text-indigo-400 font-mono text-[9px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-wider">
+                              ✨ Akun Anda
+                            </div>
+                          )}
+
+                          {isEditing ? (
+                            /* Editing Block */
+                            <div className="space-y-4 text-left">
+                              <h5 className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+                                <Key className="w-3.5 h-3.5" />
+                                <span>Edit Informasi Admin: @{user.username}</span>
+                              </h5>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-mono text-slate-400 uppercase">Nama Lengkap</label>
+                                  <input
+                                    type="text"
+                                    value={editAdminFullName}
+                                    onChange={(e) => setEditAdminFullName(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-mono text-slate-400 uppercase">Password Baru</label>
+                                  <input
+                                    type="text"
+                                    value={editAdminPassword}
+                                    onChange={(e) => setEditAdminPassword(e.target.value)}
+                                    placeholder="Kosongkan jika tidak diubah"
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-mono text-slate-400 uppercase">Role (Hak Akses)</label>
+                                  <select
+                                    value={editAdminRole}
+                                    disabled={user.id === 'admin_root'} // Cannot demote Root user
+                                    onChange={(e) => setEditAdminRole(e.target.value as any)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none cursor-pointer disabled:opacity-40"
+                                  >
+                                    <option value="operator">Operator</option>
+                                    <option value="super_admin">Super Admin</option>
+                                  </select>
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingAdminId(null)}
+                                  className="px-3.5 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 font-semibold cursor-pointer text-slate-200"
+                                >
+                                  Batal
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!editAdminFullName.trim()) return;
+                                    
+                                    onEditAdmin({
+                                      ...user,
+                                      fullName: editAdminFullName.trim(),
+                                      passwordHash: editAdminPassword.trim() ? editAdminPassword.trim() : user.passwordHash,
+                                      role: editAdminRole
+                                    });
+                                    setEditingAdminId(null);
+                                    setAdminSuccess(`Kredensial @${user.username} berhasil diperbarui.`);
+                                  }}
+                                  className="px-3.5 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 font-bold text-white cursor-pointer"
+                                >
+                                  Simpan
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Read-only Block */
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                              <div className="text-left space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-sm text-white">{user.fullName}</p>
+                                  <span className="text-[9px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded">@{user.username}</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                                  <span className="flex items-center gap-1">
+                                    <span className="text-[10px]">Akses:</span>
+                                    {user.role === 'super_admin' ? (
+                                      <span className="text-amber-400 font-bold flex items-center gap-1">🛡️ Super Admin</span>
+                                    ) : (
+                                      <span className="text-slate-300 font-semibold flex items-center gap-1">👤 Operator</span>
+                                    )}
+                                  </span>
+                                  <span className="text-slate-700">•</span>
+                                  <span className="font-mono text-[10px] text-slate-500">
+                                    Dibuat: {user.createdAt ? new Date(user.createdAt).toLocaleDateString('id-ID') : 'Sistem'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Action controls (Only available if current user is super_admin OR modifying their own account) */}
+                              {(currentUser.role === 'super_admin' || isCurrentUser) && (
+                                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                                  {/* Edit Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingAdminId(user.id);
+                                      setEditAdminFullName(user.fullName);
+                                      setEditAdminPassword('');
+                                      setEditAdminRole(user.role);
+                                    }}
+                                    className="flex items-center space-x-1 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-850 text-slate-300 rounded-xl text-xs transition-all cursor-pointer"
+                                  >
+                                    <Edit className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>Edit</span>
+                                  </button>
+
+                                  {/* Delete Button (Rule check: Cannot delete root, cannot delete own logged-in account, only Super Admins can delete others) */}
+                                  <button
+                                    type="button"
+                                    disabled={user.id === 'admin_root' || isCurrentUser || currentUser.role !== 'super_admin'}
+                                    onClick={() => {
+                                      if (confirm(`Apakah Anda yakin ingin menghapus akun pengelola '${user.fullName}' (@${user.username})? Tindakan ini tidak dapat dibatalkan.`)) {
+                                        onDeleteAdmin(user.id);
+                                        setAdminSuccess(`Akun @${user.username} berhasil dihapus.`);
+                                      }
+                                    }}
+                                    className="p-2 bg-slate-900 hover:bg-rose-950/20 border border-slate-850 hover:border-rose-900/30 text-slate-500 hover:text-rose-400 rounded-xl transition-all cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed disabled:hover:bg-slate-900 disabled:hover:border-slate-850"
+                                    title={user.id === 'admin_root' ? 'Akun master root tidak dapat dihapus' : isCurrentUser ? 'Anda tidak dapat menghapus akun Anda sendiri saat aktif' : 'Hapus pengelola'}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

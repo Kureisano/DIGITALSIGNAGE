@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+import Hls from 'hls.js';
 import { SignageState, LayoutConfig, TVChannel, CCTVCamera, Promotion, LayoutMode } from '../types';
 import CCTVPlayer from './CCTVPlayer';
-import { Volume2, VolumeX, Radio, Shield, MonitorPlay, Calendar, Sparkles, TrendingUp, Compass, Flame, Leaf, Award } from 'lucide-react';
+import { Volume2, VolumeX, Radio, Shield, MonitorPlay, Calendar, Sparkles, TrendingUp, Compass, Flame, Leaf, Award, Tv, Smartphone, X, ChevronUp, ChevronDown, List, Hash, RefreshCw, Power, Plus, Minus } from 'lucide-react';
 
 function getYouTubeId(url: string | undefined): string | null {
   if (!url) return null;
@@ -279,6 +280,110 @@ export default function SignageDisplay({
   const [userActivatedAudio, setUserActivatedAudio] = useState(false);
   const [videoMutedOverride, setVideoMutedOverride] = useState(false);
 
+  // TV Remote Control, HUD overlay & Standby states
+  const [isRemoteOpen, setIsRemoteOpen] = useState(false);
+  const [isTvGuideOpen, setIsTvGuideOpen] = useState(false);
+  const [isPowerOff, setIsPowerOff] = useState(false);
+  const [showHUD, setShowHUD] = useState(false);
+  const [hudChannel, setHudChannel] = useState<TVChannel | null>(null);
+
+  // Helper functions to alter states and sync to Cloud
+  const changeChannel = (channelId: string) => {
+    if (onChange) {
+      onChange({
+        ...state,
+        activeTVChannelId: channelId
+      });
+    }
+  };
+
+  const changeVolume = (newVolume: number) => {
+    const clamped = Math.max(0, Math.min(100, newVolume));
+    if (onChange) {
+      onChange({
+        ...state,
+        volume: clamped
+      });
+    }
+  };
+
+  const toggleMute = () => {
+    if (onChange) {
+      onChange({
+        ...state,
+        volume: volume === 0 ? 50 : 0
+      });
+    }
+  };
+
+  // Trigger HUD overlay on channel change
+  useEffect(() => {
+    if (activeChannel) {
+      setHudChannel(activeChannel);
+      setShowHUD(true);
+      const timer = setTimeout(() => {
+        setShowHUD(false);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTVChannelId, activeChannel]);
+
+  // Bind Keyboard Keys to act as TV Remote physical controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Avoid intercepting if we are focused on typing inputs
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        // Channel Up
+        const currentIndex = channelsList.findIndex(c => c.id === activeTVChannelId);
+        if (currentIndex !== -1) {
+          const nextIndex = (currentIndex + 1) % channelsList.length;
+          changeChannel(channelsList[nextIndex].id);
+        } else if (channelsList.length > 0) {
+          changeChannel(channelsList[0].id);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        // Channel Down
+        const currentIndex = channelsList.findIndex(c => c.id === activeTVChannelId);
+        if (currentIndex !== -1) {
+          const nextIndex = (currentIndex - 1 + channelsList.length) % channelsList.length;
+          changeChannel(channelsList[nextIndex].id);
+        } else if (channelsList.length > 0) {
+          changeChannel(channelsList[0].id);
+        }
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        // Volume Up
+        changeVolume(volume + 5);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        // Volume Down
+        changeVolume(volume - 5);
+      } else if (e.key >= '1' && e.key <= '9') {
+        const idx = parseInt(e.key) - 1;
+        if (idx < channelsList.length) {
+          changeChannel(channelsList[idx].id);
+        }
+      } else if (e.key.toLowerCase() === 'm') {
+        toggleMute();
+      } else if (e.key.toLowerCase() === 'r') {
+        setIsRemoteOpen(prev => !prev);
+      } else if (e.key.toLowerCase() === 'g') {
+        setIsTvGuideOpen(prev => !prev);
+      } else if (e.key.toLowerCase() === 'p') {
+        setIsPowerOff(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [channelsList, activeTVChannelId, volume, onChange]);
+
   const handleScreenInteraction = () => {
     if (!userActivatedAudio) {
       setUserActivatedAudio(true);
@@ -292,22 +397,80 @@ export default function SignageDisplay({
 
   useEffect(() => {
     setVideoError(false);
-    if (videoRef.current) {
-      videoRef.current.load();
-      
-      // Attempt standard play, fall back to muted play if browser blocks unmuted autoplay
-      videoRef.current.play().catch((err) => {
-        console.warn("Unmuted autoplay blocked, trying muted:", err);
-        if (videoRef.current) {
-          videoRef.current.muted = true;
-          setVideoMutedOverride(true);
-          videoRef.current.play().catch(e => {
-            console.error("Muted autoplay also failed:", e);
+    const video = videoRef.current;
+    if (!video) return;
+
+    let hls: Hls | null = null;
+    const streamUrl = activeChannel?.videoUrl || '';
+
+    if (streamUrl && streamUrl.includes('.m3u8')) {
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          maxMaxBufferLength: 10,
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(err => {
+            console.warn("Unmuted HLS autoplay blocked, trying muted:", err);
+            video.muted = true;
+            setVideoMutedOverride(true);
+            video.play().catch(e => console.error("Muted HLS autoplay failed:", e));
           });
-        }
-      });
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.warn("HLS Network Error, attempting recovery...", data);
+                hls?.recoverMediaError();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.warn("HLS Media Error, attempting recovery...", data);
+                hls?.recoverMediaError();
+                break;
+              default:
+                console.error("Fatal HLS error, falling back to static visualizer");
+                setVideoError(true);
+                break;
+            }
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (Safari/iOS)
+        video.src = streamUrl;
+        video.play().catch(err => {
+          console.warn("Unmuted native HLS autoplay blocked, trying muted:", err);
+          video.muted = true;
+          setVideoMutedOverride(true);
+          video.play().catch(e => console.error("Native muted HLS autoplay failed:", e));
+        });
+      } else {
+        console.error("HLS is not supported on this browser.");
+        setVideoError(true);
+      }
+    } else {
+      // Standard video (mp4, webm, etc.)
+      video.src = streamUrl;
+      if (streamUrl) {
+        video.load();
+        video.play().catch(err => {
+          console.warn("Unmuted standard autoplay blocked, trying muted:", err);
+          video.muted = true;
+          setVideoMutedOverride(true);
+          video.play().catch(e => console.error("Standard muted autoplay failed:", e));
+        });
+      }
     }
-  }, [activeTVChannelId]);
+
+    return () => {
+      if (hls) {
+        hls.destroy();
+      }
+    };
+  }, [activeChannel?.videoUrl, activeTVChannelId]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -932,6 +1095,8 @@ export default function SignageDisplay({
     }
   };
 
+  const channelNumber = activeChannel ? channelsList.findIndex(c => c.id === activeChannel.id) + 1 : 1;
+
   return (
     <div
       id="signage-view"
@@ -964,11 +1129,392 @@ export default function SignageDisplay({
           display: inline-block;
           animation: tickerRoll 25s linear infinite;
         }
+        @keyframes slideIn {
+          0% { transform: translate(30px, -50%) scale(0.94); opacity: 0; }
+          100% { transform: translate(0, -50%) scale(1); opacity: 1; }
+        }
+        .animate-slide-in {
+          animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
       `}</style>
 
       {/* Main Grid Viewport */}
       <div className="flex-1 min-h-0 relative">
         {renderLayoutContent()}
+
+        {/* TV STANBY / STANDBY NO SIGNAL OVERLAY */}
+        {isPowerOff && (
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="absolute inset-0 bg-slate-950 z-40 flex flex-col items-center justify-center select-none"
+          >
+            {/* Vintage TV scanlines & static feel */}
+            <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iMiIgaGVpZHRoPSIyIiBmaWxsPSIjZmZmIi8+Cjwvc3ZnPg==')] repeat animate-pulse" />
+            <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.15),transparent_70%)]" />
+            
+            <div className="relative z-10 flex flex-col items-center space-y-6 text-center max-w-sm px-6">
+              <div 
+                onClick={() => setIsPowerOff(false)}
+                className="w-16 h-16 rounded-full bg-slate-900 border border-red-500/40 flex items-center justify-center text-red-500 shadow-[0_0_25px_rgba(239,68,68,0.35)] animate-pulse cursor-pointer hover:scale-105 active:scale-95 transition-all"
+              >
+                <Power className="w-6.5 h-6.5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-300 font-mono tracking-widest uppercase">Standby Mode</h3>
+                <p className="text-slate-500 text-xs mt-2.5 leading-relaxed font-light">
+                  Layar berada dalam mode siaga. Ketuk tombol <span className="text-red-400 font-bold">POWER</span> di atas, tekan tombol <span className="text-red-400 font-bold">P</span> pada keyboard, atau gunakan Remote TV untuk menyalakan kembali layar.
+                </p>
+              </div>
+              
+              <button
+                onClick={() => setIsPowerOff(false)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
+              >
+                Nyalakan Layar TV ⚡
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CABLE TV GLOWING CHANNEL HUD (Heads-Up Info Display) */}
+        {showHUD && hudChannel && !isPowerOff && (
+          <div className="absolute top-4 left-4 z-40 animate-fade-in pointer-events-none select-none max-w-sm">
+            <div className="bg-slate-950/95 backdrop-blur-md border border-indigo-500/25 rounded-2xl p-4 shadow-2xl shadow-indigo-500/5 flex items-center space-x-3.5 border-l-4 border-l-indigo-500">
+              
+              {/* Channel Number */}
+              <div className="w-11 h-11 rounded-xl bg-indigo-600/10 border border-indigo-500/30 flex flex-col items-center justify-center text-indigo-400 font-mono">
+                <span className="text-[8px] font-extrabold tracking-wider text-indigo-500/80 uppercase leading-none mb-0.5">CH</span>
+                <span className="text-base font-black leading-none">
+                  {channelNumber.toString().padStart(2, '0')}
+                </span>
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-[8px] font-mono font-bold uppercase text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-md">
+                    {hudChannel.category}
+                  </span>
+                  <span className="text-[8px] font-mono text-slate-400">
+                    • Vol: {volume}% {volume === 0 && '🔇'}
+                  </span>
+                </div>
+                <h4 className="text-xs font-bold text-white mt-1 truncate">{hudChannel.name}</h4>
+                <p className="text-[9px] text-slate-500 truncate mt-0.5 font-mono">{hudChannel.videoUrl.split('?')[0]}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FULLSCREEN TV GUIDE INTERACTIVE MODAL */}
+        {isTvGuideOpen && !isPowerOff && (
+          <div 
+            onClick={(e) => { e.stopPropagation(); setIsTvGuideOpen(false); }}
+            className="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6 select-none"
+          >
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md max-h-[85%] overflow-hidden flex flex-col shadow-2xl shadow-indigo-500/10"
+            >
+              <div className="p-4 border-b border-slate-850 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Tv className="w-4.5 h-4.5 text-indigo-400 animate-pulse" />
+                  <div>
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Panduan Saluran TV (IPTV)</h3>
+                    <p className="text-[9px] text-slate-400 mt-0.5">Pilih saluran aktif langsung pada layar TV.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsTvGuideOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-slate-950/60 border border-slate-800/80 hover:bg-slate-850 transition-all cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 max-h-[350px]">
+                {channelsList.map((ch, idx) => {
+                  const isCurrent = ch.id === activeTVChannelId;
+                  const chNum = idx + 1;
+                  return (
+                    <div
+                      key={ch.id}
+                      onClick={() => {
+                        changeChannel(ch.id);
+                        setIsTvGuideOpen(false);
+                      }}
+                      className={`p-3 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                        isCurrent 
+                          ? 'bg-indigo-600/15 border-indigo-500/60 shadow-lg shadow-indigo-600/5' 
+                          : 'bg-slate-950/40 border-slate-850 hover:bg-slate-850/50 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className={`w-7 h-7 rounded-lg font-mono font-black text-xs flex items-center justify-center border ${
+                          isCurrent 
+                            ? 'bg-indigo-600 text-white border-indigo-400' 
+                            : 'bg-slate-900 text-slate-500 border-slate-800'
+                        }`}>
+                          {chNum.toString().padStart(2, '0')}
+                        </div>
+
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-white truncate">{ch.name.split(' (')[0]}</h4>
+                          <span className="text-[8px] font-mono text-slate-400 uppercase tracking-wider">
+                            {ch.category}
+                          </span>
+                        </div>
+                      </div>
+
+                      {isCurrent ? (
+                        <span className="text-[8px] font-mono font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full animate-pulse">
+                          AKTIF
+                        </span>
+                      ) : (
+                        <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wide">
+                          PILIH
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="p-3 border-t border-slate-850 bg-slate-950/40 text-center text-[9px] font-mono text-slate-500">
+                Gunakan tombol keyboard angka (1-9) untuk navigasi cepat
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SKEUOMORPHIC FLOATING TV REMOTE CONTROL PANEL */}
+        {isRemoteOpen && (
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-1/2 -translate-y-1/2 right-6 z-50 animate-slide-in select-none"
+          >
+            <div className="bg-slate-950/95 backdrop-blur border border-slate-800/80 rounded-[2.5rem] p-4.5 w-[210px] flex flex-col border-t-slate-700/60 border-l-slate-700/40 shadow-2xl shadow-indigo-500/10 relative">
+              {/* Infrared Transmitter LED */}
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-1.5 bg-slate-900 rounded-b-full border-b border-slate-700" />
+              <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-indigo-500/40 rounded-full animate-pulse" />
+
+              {/* Remote Header */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 mb-3">
+                <span className="text-[8px] font-mono font-bold tracking-wider text-slate-500">SIGNAGE REMOTE</span>
+                <button 
+                  onClick={() => setIsRemoteOpen(false)}
+                  className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* Row 1: Power, Mute & TV Guide */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <button
+                  onClick={toggleMute}
+                  className={`h-8 rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
+                    volume === 0 
+                      ? 'bg-rose-500/20 border-rose-500 text-rose-400' 
+                      : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  }`}
+                  title="Mute"
+                >
+                  <VolumeX className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  onClick={() => setIsTvGuideOpen(!isTvGuideOpen)}
+                  className={`h-8 rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
+                    isTvGuideOpen 
+                      ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' 
+                      : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  }`}
+                  title="TV Guide"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  onClick={() => setIsPowerOff(!isPowerOff)}
+                  className={`h-8 rounded-lg flex items-center justify-center text-white transition-all cursor-pointer ${
+                    isPowerOff 
+                      ? 'bg-red-500' 
+                      : 'bg-red-600 hover:bg-red-500'
+                  }`}
+                  title="Power Standby"
+                >
+                  <Power className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Status Screen inside Remote */}
+              <div className="bg-slate-950 border border-slate-900 rounded-xl p-2 mb-3 text-center font-mono text-[10px]">
+                <div className="text-[7px] text-slate-500 font-bold uppercase tracking-widest leading-none">CHANNEL INDEX</div>
+                <div className="text-white font-bold mt-1 truncate">
+                  CH {channelNumber.toString().padStart(2, '0')} • {activeChannel ? activeChannel.name.split(' (')[0] : 'Ambient Lofi'}
+                </div>
+              </div>
+
+              {/* Navigation D-PAD Circular switcher */}
+              <div className="flex justify-center mb-3.5">
+                <div className="relative w-24 h-24 bg-slate-900 rounded-full border border-slate-800 flex items-center justify-center shadow-inner">
+                  {/* Center Guide trigger */}
+                  <button
+                    onClick={() => setIsTvGuideOpen(!isTvGuideOpen)}
+                    className="absolute w-8 h-8 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-[7px] font-mono font-bold text-slate-400 hover:text-white cursor-pointer z-10"
+                  >
+                    OK
+                  </button>
+
+                  {/* Channel Up */}
+                  <button
+                    onClick={() => {
+                      const currentIndex = channelsList.findIndex(c => c.id === activeTVChannelId);
+                      const nextIndex = (currentIndex + 1) % channelsList.length;
+                      changeChannel(channelsList[nextIndex].id);
+                    }}
+                    className="absolute top-1.5 left-1/2 -translate-x-1/2 flex flex-col items-center text-slate-400 hover:text-white cursor-pointer"
+                    title="Saluran +"
+                  >
+                    <ChevronUp className="w-4 h-4 text-indigo-400" />
+                    <span className="text-[6px] font-bold font-mono">CH+</span>
+                  </button>
+
+                  {/* Channel Down */}
+                  <button
+                    onClick={() => {
+                      const currentIndex = channelsList.findIndex(c => c.id === activeTVChannelId);
+                      const nextIndex = (currentIndex - 1 + channelsList.length) % channelsList.length;
+                      changeChannel(channelsList[nextIndex].id);
+                    }}
+                    className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex flex-col items-center text-slate-400 hover:text-white cursor-pointer"
+                    title="Saluran -"
+                  >
+                    <span className="text-[6px] font-bold font-mono">CH-</span>
+                    <ChevronDown className="w-4 h-4 text-indigo-400" />
+                  </button>
+
+                  {/* Volume Up */}
+                  <button
+                    onClick={() => changeVolume(volume + 5)}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center text-slate-400 hover:text-white cursor-pointer"
+                    title="Volume +"
+                  >
+                    <span className="text-[6px] font-bold font-mono mr-0.5">V+</span>
+                    <Plus className="w-3 h-3 text-indigo-400" />
+                  </button>
+
+                  {/* Volume Down */}
+                  <button
+                    onClick={() => changeVolume(volume - 5)}
+                    className="absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center text-slate-400 hover:text-white cursor-pointer"
+                    title="Volume -"
+                  >
+                    <Minus className="w-3 h-3 text-indigo-400" />
+                    <span className="text-[6px] font-bold font-mono ml-0.5">V-</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Number Pad Grid */}
+              <div className="grid grid-cols-3 gap-1 px-0.5 mb-3">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => {
+                  const hasCh = (num - 1) < channelsList.length;
+                  return (
+                    <button
+                      key={num}
+                      disabled={!hasCh}
+                      onClick={() => changeChannel(channelsList[num - 1].id)}
+                      className={`h-7 rounded-lg flex items-center justify-center font-mono text-[10px] font-bold transition-all cursor-pointer ${
+                        hasCh 
+                          ? 'bg-slate-900 border border-slate-800 text-white hover:bg-slate-800' 
+                          : 'bg-slate-950 text-slate-700 cursor-not-allowed border border-transparent'
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  );
+                })}
+                
+                <button
+                  onClick={() => changeChannel(channelsList[channelsList.length - 1]?.id || '')}
+                  className="h-7 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 text-[8px] font-mono hover:bg-slate-800 cursor-pointer"
+                >
+                  LAST
+                </button>
+
+                <button
+                  onClick={() => changeChannel(channelsList[0]?.id || '')}
+                  className="h-7 rounded-lg bg-slate-900 border border-slate-800 text-white text-[10px] font-mono hover:bg-slate-800 cursor-pointer"
+                >
+                  0
+                </button>
+
+                <button
+                  onClick={() => setIsTvGuideOpen(!isTvGuideOpen)}
+                  className="h-7 rounded-lg bg-indigo-950/40 border border-indigo-900/20 text-indigo-400 text-[7px] font-mono hover:bg-indigo-900/20 cursor-pointer"
+                >
+                  GUIDE
+                </button>
+              </div>
+
+              {/* Colored Quick Launcher Buttons */}
+              <div className="grid grid-cols-4 gap-1.5 px-0.5 border-t border-slate-900 pt-3">
+                <button
+                  onClick={() => {
+                    const ch = channelsList.find(c => c.category === 'News');
+                    if (ch) changeChannel(ch.id);
+                  }}
+                  className="h-2.5 rounded-full bg-red-600 hover:bg-red-500 cursor-pointer active:scale-95"
+                  title="Category: News"
+                />
+                <button
+                  onClick={() => {
+                    const ch = channelsList.find(c => c.category === 'Entertainment');
+                    if (ch) changeChannel(ch.id);
+                  }}
+                  className="h-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 cursor-pointer active:scale-95"
+                  title="Category: Entertainment"
+                />
+                <button
+                  onClick={() => {
+                    const ch = channelsList.find(c => c.category === 'Sports');
+                    if (ch) changeChannel(ch.id);
+                  }}
+                  className="h-2.5 rounded-full bg-amber-500 hover:bg-amber-450 cursor-pointer active:scale-95"
+                  title="Category: Sports"
+                />
+                <button
+                  onClick={() => {
+                    const ch = channelsList.find(c => c.category === 'Scenery' || c.category === 'Documentary');
+                    if (ch) changeChannel(ch.id);
+                  }}
+                  className="h-2.5 rounded-full bg-cyan-500 hover:bg-cyan-400 cursor-pointer active:scale-95"
+                  title="Category: Scenery / Documentary"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ELEGANT FLOATING REMOTE CONTROLLER ICON ACTION */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsRemoteOpen(!isRemoteOpen);
+          }}
+          className={`absolute bottom-4 right-4 z-40 p-3 rounded-full flex items-center justify-center text-white transition-all shadow-xl border cursor-pointer group select-none hover:scale-105 active:scale-95 ${
+            isRemoteOpen 
+              ? 'bg-rose-600 border-rose-500 shadow-rose-600/30' 
+              : 'bg-indigo-600 hover:bg-indigo-500 border-indigo-500/50 shadow-indigo-600/30'
+          }`}
+          title="Buka Remote TV Virtual"
+        >
+          {isRemoteOpen ? <X className="w-4 h-4 animate-spin" style={{ animationDuration: '0.4s' }} /> : <Smartphone className="w-4 h-4 group-hover:rotate-12 duration-200" />}
+          <span className="max-w-0 overflow-hidden group-hover:max-w-[120px] transition-all duration-300 ease-out whitespace-nowrap text-[10px] font-bold font-mono pl-0 group-hover:pl-2">
+            {isRemoteOpen ? 'Tutup' : 'Remote TV 📺'}
+          </span>
+        </button>
       </div>
 
       {/* Ticker / Marquee footer bar (if configured) */}
