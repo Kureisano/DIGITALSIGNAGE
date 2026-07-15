@@ -6,7 +6,7 @@ import {
   Tv, Shield, Calendar, Sliders, Play, Plus, Trash2, Edit, ExternalLink, Sparkles, 
   Clock, RefreshCw, Volume2, LayoutGrid, Check, AlertCircle, Sun, Info, HeartPulse, 
   HelpCircle, Eye, MonitorPlay, CheckCircle2, ChevronRight, Minimize2, Maximize2, Loader2,
-  LogOut, Monitor, Copy, Users, UserPlus, Key, UserCheck
+  LogOut, Monitor, Copy, Users, UserPlus, Key, UserCheck, Upload, FileCode, Search, FileUp, Globe
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -26,6 +26,81 @@ interface AdminDashboardProps {
   onEditAdmin?: (admin: AdminUser) => void;
   onDeleteAdmin?: (id: string) => void;
   onSyncTVChannelsToAllDisplays?: (channels: TVChannel[], activeTVChannelId: string) => Promise<void>;
+}
+
+function parseM3U(m3uText: string): TVChannel[] {
+  const lines = m3uText.split(/\r?\n/);
+  const parsedChannels: TVChannel[] = [];
+  
+  let currentInfo: {
+    name?: string;
+    logoUrl?: string;
+    category?: 'News' | 'Entertainment' | 'Sports' | 'Documentary' | 'Scenery';
+  } | null = null;
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+
+    if (line.toUpperCase().startsWith('#EXTINF:')) {
+      const logoMatch = line.match(/tvg-logo="([^"]+)"/i) || line.match(/tvg-logo='([^']+)'/i);
+      const groupMatch = line.match(/group-title="([^"]+)"/i) || line.match(/group-title='([^']+)'/i);
+      
+      const commaIndex = line.lastIndexOf(',');
+      let name = 'Saluran IPTV Tanpa Nama';
+      if (commaIndex !== -1) {
+        name = line.substring(commaIndex + 1).trim();
+      }
+
+      let category: 'News' | 'Entertainment' | 'Sports' | 'Documentary' | 'Scenery' = 'News';
+      const groupTitle = groupMatch ? groupMatch[1].toLowerCase() : '';
+      const nameLower = name.toLowerCase();
+
+      if (groupTitle.includes('sport') || nameLower.includes('sport') || nameLower.includes('bola') || nameLower.includes('sports')) {
+        category = 'Sports';
+      } else if (groupTitle.includes('movie') || groupTitle.includes('entertainment') || nameLower.includes('tv') || nameLower.includes('movie') || nameLower.includes('drama') || nameLower.includes('cinema')) {
+        category = 'Entertainment';
+      } else if (groupTitle.includes('doc') || nameLower.includes('history') || nameLower.includes('geo') || nameLower.includes('discovery') || nameLower.includes('animal')) {
+        category = 'Documentary';
+      } else if (groupTitle.includes('scen') || nameLower.includes('nature') || nameLower.includes('scenery') || nameLower.includes('travel')) {
+        category = 'Scenery';
+      } else if (groupTitle.includes('news') || nameLower.includes('berita') || nameLower.includes('news') || nameLower.includes('cnn') || nameLower.includes('bbc')) {
+        category = 'News';
+      }
+
+      currentInfo = {
+        name,
+        logoUrl: logoMatch ? logoMatch[1] : undefined,
+        category,
+      };
+    } else if (line.startsWith('http://') || line.startsWith('https://') || line.startsWith('rtmp://') || line.startsWith('rtsp://') || line.includes('.m3u8')) {
+      if (currentInfo) {
+        parsedChannels.push({
+          id: `ch_m3u_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          name: currentInfo.name || 'Saluran IPTV Tanpa Nama',
+          category: currentInfo.category || 'News',
+          videoUrl: line,
+          logoUrl: currentInfo.logoUrl,
+          isSimulated: false,
+          overlayText: `IPTV: ${currentInfo.name || 'Saluran IPTV'}`
+        });
+        currentInfo = null;
+      } else {
+        const urlSegments = line.split('/');
+        const fallbackName = urlSegments[urlSegments.length - 1]?.split('?')[0] || 'Saluran IPTV';
+        parsedChannels.push({
+          id: `ch_m3u_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          name: fallbackName,
+          category: 'News',
+          videoUrl: line,
+          isSimulated: false,
+          overlayText: `IPTV: ${fallbackName}`
+        });
+      }
+    }
+  }
+
+  return parsedChannels;
 }
 
 const PRESET_IMAGES = [
@@ -110,6 +185,16 @@ export default function AdminDashboard({
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [mainLinkCopied, setMainLinkCopied] = useState(false);
 
+  // M3U Importer States
+  const [showM3UImport, setShowM3UImport] = useState(false);
+  const [m3uUrl, setM3UUrl] = useState('');
+  const [m3uText, setM3UText] = useState('');
+  const [parsedChannels, setParsedChannels] = useState<TVChannel[]>([]);
+  const [importSearch, setImportSearch] = useState('');
+  const [selectedM3UIndexes, setSelectedM3UIndexes] = useState<number[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState('');
+
   // Form states for TV Channels CRUD
   const [showTVForm, setShowTVForm] = useState(false);
   const [editingTVId, setEditingTVId] = useState<string | null>(null);
@@ -135,6 +220,59 @@ export default function AdminDashboard({
     colorTheme: 'monochrome',
     rtspUrl: '',
   });
+
+  // M3U Import Handler Functions
+  const handleParseM3UContent = (content: string) => {
+    setParseError('');
+    try {
+      const parsed = parseM3U(content);
+      if (parsed.length === 0) {
+        setParseError('Tidak ditemukan saluran siaran IPTV yang valid di dalam file M3U ini. Pastikan format file menggunakan standar #EXTM3U.');
+        setParsedChannels([]);
+        setSelectedM3UIndexes([]);
+        return;
+      }
+      setParsedChannels(parsed);
+      setSelectedM3UIndexes(parsed.map((_, idx) => idx));
+    } catch (err) {
+      setParseError('Gagal memproses file M3U. Format tidak dikenali.');
+      setParsedChannels([]);
+      setSelectedM3UIndexes([]);
+    }
+  };
+
+  const handleM3UFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setM3UText(text);
+      handleParseM3UContent(text);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleFetchM3UUrl = async () => {
+    if (!m3uUrl) return;
+    setIsParsing(true);
+    setParseError('');
+    try {
+      const response = await fetch(m3uUrl);
+      if (!response.ok) {
+        throw new Error(`Gagal mengunduh: HTTP ${response.status}`);
+      }
+      const text = await response.text();
+      setM3UText(text);
+      handleParseM3UContent(text);
+    } catch (err: any) {
+      console.error(err);
+      setParseError('Gagal mengunduh URL secara langsung (kemungkinan kendala CORS/lintas-domain). Silakan salin isi konten M3U atau unduh file M3U lalu unggah menggunakan tombol file di bawah.');
+    } finally {
+      setIsParsing(false);
+    }
+  };
 
   // TV Channel Handlers
   const handleSaveTV = (e: React.FormEvent) => {
@@ -1806,24 +1944,41 @@ export default function AdminDashboard({
                     <h3 className="text-sm font-bold text-white uppercase tracking-wider">Konfigurasi Siaran TV & IPTV</h3>
                     <p className="text-slate-400 text-xs mt-1">Atur sumber siaran berita, video dekorasi, atau saluran streaming IPTV live.</p>
                   </div>
-                  {!showTVForm && (
-                    <button
-                      onClick={() => {
-                        setEditingTVId(null);
-                        setTVForm({
-                          name: '',
-                          category: 'News',
-                          videoUrl: '',
-                          isSimulated: false,
-                          overlayText: '',
-                        });
-                        setShowTVForm(true);
-                      }}
-                      className="flex items-center space-x-1 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Tambah IPTV / Channel</span>
-                    </button>
+                  {!showTVForm && !showM3UImport && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setShowM3UImport(true);
+                          setM3UUrl('');
+                          setM3UText('');
+                          setParsedChannels([]);
+                          setParseError('');
+                          setImportSearch('');
+                        }}
+                        className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-semibold rounded-xl transition-all shadow-md cursor-pointer"
+                      >
+                        <FileUp className="w-4 h-4 text-emerald-400" />
+                        <span>Import Playlist M3U</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingTVId(null);
+                          setTVForm({
+                            name: '',
+                            category: 'News',
+                            videoUrl: '',
+                            isSimulated: false,
+                            overlayText: '',
+                          });
+                          setShowTVForm(true);
+                        }}
+                        className="flex items-center space-x-1 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Tambah IPTV / Channel</span>
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1982,6 +2137,231 @@ export default function AdminDashboard({
                     )}
                   </div>
                 </div>
+
+                {showM3UImport && (
+                  <div className="bg-slate-900/20 border border-slate-800 rounded-2xl p-6 space-y-5">
+                    <div className="flex justify-between items-center pb-2 border-b border-slate-850">
+                      <h4 className="text-xs font-mono font-bold text-emerald-400 uppercase tracking-widest flex items-center">
+                        <FileUp className="w-4.5 h-4.5 mr-1.5 text-emerald-400" />
+                        <span>Batch Import Playlist M3U / IPTV Player</span>
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowM3UImport(false);
+                          setParsedChannels([]);
+                          setM3UText('');
+                          setM3UUrl('');
+                          setParseError('');
+                        }}
+                        className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer text-xs font-semibold"
+                      >
+                        Tutup Panel
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                      {/* Left Side: Input M3U */}
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase tracking-widest font-bold">Opsi 1: URL Playlist M3U</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="url"
+                              value={m3uUrl}
+                              onChange={(e) => setM3UUrl(e.target.value)}
+                              placeholder="Contoh: https://iptv-org.github.io/iptv/countries/id.m3u"
+                              className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleFetchM3UUrl}
+                              disabled={isParsing || !m3uUrl}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-950/40 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                            >
+                              {isParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                              <span>{isParsing ? 'Proses...' : 'Unduh'}</span>
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-normal">
+                            Unduh daftar siaran IPTV dari url publik penyedia IPTV Anda secara langsung.
+                          </p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase tracking-widest font-bold">Opsi 2: Unggah File M3U (.m3u, .m3u8)</label>
+                          <div className="border-2 border-dashed border-slate-800 hover:border-slate-700 transition-colors rounded-xl p-4 flex flex-col items-center justify-center text-center cursor-pointer relative">
+                            <input
+                              type="file"
+                              accept=".m3u,.m3u8,text/plain"
+                              onChange={handleM3UFileUpload}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                            />
+                            <Upload className="w-7 h-7 text-emerald-500/80 mb-2 animate-bounce" />
+                            <span className="text-xs font-semibold text-slate-300">Pilih file M3U di komputer Anda</span>
+                            <span className="text-[10px] text-slate-500 mt-1">Maksimal 10MB • format .m3u, .m3u8, atau .txt</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase tracking-widest font-bold">Opsi 3: Paste Kode Teks M3U Manual</label>
+                          <textarea
+                            rows={5}
+                            value={m3uText}
+                            onChange={(e) => {
+                              setM3UText(e.target.value);
+                              handleParseM3UContent(e.target.value);
+                            }}
+                            placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-logo='http://logo' group-title='News',CNN Indonesia&#10;https://example.com/cnn.m3u8"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono leading-normal focus:border-emerald-500 focus:outline-none placeholder-slate-700"
+                          />
+                          <p className="text-[10px] text-slate-500">
+                            Tempel langsung kode text M3U Anda di sini untuk diproses secara instan di browser.
+                          </p>
+                        </div>
+
+                        {parseError && (
+                          <div className="p-3.5 bg-red-950/20 border border-red-500/30 text-red-400 text-xs rounded-xl flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                            <p className="leading-relaxed">{parseError}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right Side: Parsed Channels Preview */}
+                      <div className="border border-slate-800/80 bg-slate-950/40 rounded-xl p-4 flex flex-col h-[350px]">
+                        <div className="flex justify-between items-center pb-2 border-b border-slate-850 mb-3 flex-shrink-0">
+                          <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider">
+                            Saluran Ditemukan ({parsedChannels.length})
+                          </span>
+                          {parsedChannels.length > 0 && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedM3UIndexes(parsedChannels.map((_, i) => i))}
+                                className="text-[9px] font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
+                              >
+                                Pilih Semua
+                              </button>
+                              <span className="text-slate-800 font-bold">|</span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedM3UIndexes([])}
+                                className="text-[9px] font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
+                              >
+                                Bersihkan
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {parsedChannels.length > 0 ? (
+                          <>
+                            {/* Filter input */}
+                            <div className="relative mb-3 flex-shrink-0">
+                              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 pointer-events-none">
+                                <Search className="w-3.5 h-3.5" />
+                              </span>
+                              <input
+                                type="text"
+                                value={importSearch}
+                                onChange={(e) => setImportSearch(e.target.value)}
+                                placeholder="Cari nama saluran..."
+                                className="w-full bg-slate-950 border border-slate-850 rounded-lg pl-8.5 pr-3 py-1.5 text-[11px] text-white focus:border-emerald-500 focus:outline-none"
+                              />
+                            </div>
+
+                            {/* Channels list scrollable */}
+                            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 text-left select-none">
+                              {parsedChannels
+                                .map((ch, idx) => ({ ch, idx }))
+                                .filter(({ ch }) => ch.name.toLowerCase().includes(importSearch.toLowerCase()))
+                                .map(({ ch, idx }) => {
+                                  const isChecked = selectedM3UIndexes.includes(idx);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      onClick={() => {
+                                        if (isChecked) {
+                                          setSelectedM3UIndexes(selectedM3UIndexes.filter((i) => i !== idx));
+                                        } else {
+                                          setSelectedM3UIndexes([...selectedM3UIndexes, idx]);
+                                        }
+                                      }}
+                                      className={`p-2 rounded-lg border text-xs cursor-pointer flex items-center space-x-2.5 transition-all ${
+                                        isChecked
+                                          ? 'bg-emerald-500/10 border-emerald-500/30 text-white'
+                                          : 'bg-slate-950 border-slate-900 text-slate-400 hover:bg-slate-900/60'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        readOnly
+                                        className="rounded border-slate-800 bg-slate-950 text-emerald-600 focus:ring-0 focus:ring-offset-0 h-3.5 w-3.5 cursor-pointer flex-shrink-0"
+                                      />
+                                      <Tv className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="font-semibold text-slate-200 truncate">{ch.name}</div>
+                                        <div className="text-[9px] text-slate-500 font-mono truncate">{ch.videoUrl}</div>
+                                      </div>
+                                      <span className="bg-slate-900 text-slate-500 text-[9px] px-1.5 py-0.5 rounded border border-slate-850 flex-shrink-0">
+                                        {ch.category}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+
+                            {/* Import Button */}
+                            <div className="pt-3 border-t border-slate-850 mt-3 flex-shrink-0 flex justify-between items-center">
+                              <span className="text-[10px] text-slate-400">
+                                <strong className="text-emerald-400 font-mono font-extrabold">{selectedM3UIndexes.length}</strong> dari {parsedChannels.length} dipilih
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (selectedM3UIndexes.length === 0) return;
+                                  const toImport = parsedChannels.filter((_, idx) => selectedM3UIndexes.includes(idx));
+                                  // Append to channelsList
+                                  const updated = [...channelsList];
+                                  toImport.forEach((importedChan) => {
+                                    // Avoid duplicates by videoUrl
+                                    if (!updated.some((c) => c.videoUrl === importedChan.videoUrl)) {
+                                      updated.push({
+                                        ...importedChan,
+                                        id: `ch_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+                                      });
+                                    }
+                                  });
+                                  onChange({
+                                    ...state,
+                                    channels: updated,
+                                    activeTVChannelId: state.activeTVChannelId || updated[0]?.id
+                                  });
+                                  setShowM3UImport(false);
+                                  setParsedChannels([]);
+                                }}
+                                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer flex items-center space-x-1"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Import ke Playlist TV ({selectedM3UIndexes.length})</span>
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-500 p-4">
+                            <FileCode className="w-10 h-10 text-slate-700 mb-2.5 animate-pulse" />
+                            <div className="text-xs font-bold text-slate-400">Tidak Ada Data Pratinjau</div>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal max-w-[200px]">
+                              Unduh dari URL, unggah file, atau paste teks M3U di panel kiri untuk melihat hasil pratinjau.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {showTVForm && (
                   <form onSubmit={handleSaveTV} className="bg-slate-900/20 border border-slate-800 rounded-2xl p-6 space-y-4">
