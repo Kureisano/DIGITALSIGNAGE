@@ -112,6 +112,22 @@ const PRESET_IMAGES = [
   { label: '🛍️ Fashion Store', url: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800' }
 ];
 
+function getSafeDisplayUrl(displayId?: string): string {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      const origin = window.location.origin;
+      const pathname = window.location.pathname;
+      if (origin) {
+        const query = displayId ? `?mode=display&displayId=${displayId}` : '?mode=display';
+        return `${origin}${pathname}${query}`;
+      }
+    }
+  } catch (e) {
+    console.warn("Could not get window.location safely inside iframe:", e);
+  }
+  return `/?mode=display${displayId ? `&displayId=${displayId}` : ''}`;
+}
+
 export default function AdminDashboard({ 
   state, 
   onChange,
@@ -197,6 +213,7 @@ export default function AdminDashboard({
 
   // Form states for TV Channels CRUD
   const [showTVForm, setShowTVForm] = useState(false);
+  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [editingTVId, setEditingTVId] = useState<string | null>(null);
   const [tvForm, setTVForm] = useState<Partial<TVChannel>>({
     name: '',
@@ -347,6 +364,30 @@ export default function AdminDashboard({
       channels: filtered,
       activeTVChannelId: nextActiveId,
     });
+
+    // Clean up deleted ID from selected channel list if checked
+    setSelectedChannelIds(prev => prev.filter(item => item !== id));
+  };
+
+  const handleDeleteMultipleTV = () => {
+    if (selectedChannelIds.length === 0) return;
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus ${selectedChannelIds.length} saluran TV yang terpilih?`)) {
+      return;
+    }
+    const filtered = channelsList.filter((ch) => !selectedChannelIds.includes(ch.id));
+    
+    // Fallback if deleted the active channel
+    let nextActiveId = state.activeTVChannelId;
+    if (selectedChannelIds.includes(nextActiveId)) {
+      nextActiveId = filtered[0]?.id || '';
+    }
+
+    onChange({
+      ...state,
+      channels: filtered,
+      activeTVChannelId: nextActiveId,
+    });
+    setSelectedChannelIds([]);
   };
 
   // CCTV Camera Handlers
@@ -2468,7 +2509,45 @@ export default function AdminDashboard({
                 )}
 
                 <div className="space-y-4">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pilih Saluran TV Aktif</h4>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-slate-850">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pilih Saluran TV Aktif</h4>
+                    
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      {channelsList.length > 0 && (
+                        <label className="flex items-center space-x-1.5 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={channelsList.length > 0 && selectedChannelIds.length === channelsList.length}
+                            ref={el => {
+                              if (el) {
+                                el.indeterminate = selectedChannelIds.length > 0 && selectedChannelIds.length < channelsList.length;
+                              }
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedChannelIds(channelsList.map(ch => ch.id));
+                              } else {
+                                setSelectedChannelIds([]);
+                              }
+                            }}
+                            className="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0 focus:ring-offset-0 h-3.5 w-3.5 cursor-pointer"
+                          />
+                          <span className="font-semibold text-slate-300">Pilih Semua ({channelsList.length})</span>
+                        </label>
+                      )}
+                      
+                      {selectedChannelIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteMultipleTV}
+                          className="flex items-center space-x-1 px-3 py-1.5 bg-red-950/40 hover:bg-red-900 text-red-200 hover:text-white border border-red-900/50 hover:border-red-700 text-[11px] font-bold rounded-lg transition-all shadow-md cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus Terpilih ({selectedChannelIds.length})</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {channelsList.map((ch) => {
@@ -2489,11 +2568,27 @@ export default function AdminDashboard({
                            }`}
                          >
                            <div className="flex justify-between items-start w-full">
-                             <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                               isSelected ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 border border-slate-800'
-                             }`}>
-                               <Tv className="w-4.5 h-4.5" />
-                             </span>
+                             <div className="flex items-center space-x-2.5">
+                               <input
+                                 type="checkbox"
+                                 checked={selectedChannelIds.includes(ch.id)}
+                                 onChange={(e) => {
+                                   e.stopPropagation();
+                                   if (e.target.checked) {
+                                     setSelectedChannelIds(prev => [...prev, ch.id]);
+                                   } else {
+                                     setSelectedChannelIds(prev => prev.filter(id => id !== ch.id));
+                                   }
+                                 }}
+                                 onClick={(e) => e.stopPropagation()}
+                                 className="rounded border-slate-850 bg-slate-950 text-indigo-600 focus:ring-0 focus:ring-offset-0 h-4 w-4 cursor-pointer"
+                                />
+                               <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                                 isSelected ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 border border-slate-800'
+                               }`}>
+                                 <Tv className="w-4.5 h-4.5" />
+                               </span>
+                             </div>
                              
                              <div className="flex items-center space-x-1.5 opacity-85 hover:opacity-100 transition-opacity">
                                <button
@@ -2953,7 +3048,7 @@ export default function AdminDashboard({
                     </p>
                     <div className="bg-slate-950/90 border border-slate-850 rounded-xl px-3 py-2.5 flex items-center justify-between mt-2.5">
                       <span className="font-mono text-cyan-400 text-xs break-all truncate mr-4">
-                        {typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}?mode=display` : '?mode=display'}
+                        {getSafeDisplayUrl()}
                       </span>
                     </div>
                   </div>
@@ -2961,7 +3056,7 @@ export default function AdminDashboard({
                     <button
                       type="button"
                       onClick={() => {
-                        const mainUrl = typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}?mode=display` : '';
+                        const mainUrl = getSafeDisplayUrl();
                         if (mainUrl) {
                           navigator.clipboard.writeText(mainUrl);
                           setMainLinkCopied(true);
@@ -3075,7 +3170,7 @@ export default function AdminDashboard({
                     {displaysList.map((display) => {
                       const isCurrentlyConfiguring = selectedDisplayId === display.id;
                       const isEditing = editingDisplayId === display.id;
-                      const tvUrl = `${window.location.origin}${window.location.pathname}?mode=display&displayId=${display.id}`;
+                      const tvUrl = getSafeDisplayUrl(display.id);
 
                       return (
                         <div

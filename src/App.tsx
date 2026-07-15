@@ -6,11 +6,29 @@ import SignageDisplay from './components/SignageDisplay';
 import AdminLogin from './components/AdminLogin';
 import DisplayLogin from './components/DisplayLogin';
 import { PRESET_LAYOUTS } from './initialData';
-import { doc, onSnapshot, setDoc, updateDoc, collection } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, collection, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
+
+// Helper to recursively remove undefined properties from Firestore payloads to prevent payload errors
+function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) return null as any;
+  if (data === null || typeof data !== 'object') return data;
+  if (data instanceof Date) return data as any;
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirestore(item)) as any;
+  }
+  const cleaned: any = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      cleaned[key] = sanitizeForFirestore(value);
+    }
+  }
+  return cleaned;
+}
 
 export default function App() {
   const [state, setState] = useState<SignageState>(INITIAL_SIGNAGE_STATE);
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(false);
   const [isStandaloneDisplay, setIsStandaloneDisplay] = useState(false);
   const [displayId, setDisplayId] = useState('global_state');
   const [isDisplayLoggedIn, setIsDisplayLoggedIn] = useState(false);
@@ -81,10 +99,27 @@ export default function App() {
           { id: 'display_cafeteria', name: 'Layar Kafe & Menu', location: 'Area Kafetaria Lantai Dasar', createdAt: Date.now() },
           { id: 'display_office', name: 'Layar Informasi Kantor', location: 'Ruang Kerja Bersama Lantai 2', createdAt: Date.now() }
         ];
-        setDoc(displaysRef, { displays: INITIAL_DISPLAYS })
+        setDoc(displaysRef, sanitizeForFirestore({ displays: INITIAL_DISPLAYS }))
           .then(() => setDisplaysList(INITIAL_DISPLAYS))
-          .catch(err => console.error("Error seeding displays list:", err));
+          .catch(err => {
+            console.error("Error seeding displays list:", err);
+            if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+              setFirestoreQuotaExceeded(true);
+            }
+          });
       }
+    }, (error: any) => {
+      console.warn("displays_list onSnapshot error:", error);
+      if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
+      // Fallback
+      const INITIAL_DISPLAYS: DisplayItem[] = [
+        { id: 'global_state', name: 'Layar Utama (Lobi)', location: 'Lobby Utama Gedung', createdAt: Date.now() },
+        { id: 'display_cafeteria', name: 'Layar Kafe & Menu', location: 'Area Kafetaria Lantai Dasar', createdAt: Date.now() },
+        { id: 'display_office', name: 'Layar Informasi Kantor', location: 'Ruang Kerja Bersama Lantai 2', createdAt: Date.now() }
+      ];
+      setDisplaysList(prev => prev.length > 0 ? prev : INITIAL_DISPLAYS);
     });
 
     return () => unsubscribe();
@@ -112,10 +147,31 @@ export default function App() {
             createdAt: Date.now()
           }
         ];
-        setDoc(adminsRef, { admins: INITIAL_ADMINS })
+        setDoc(adminsRef, sanitizeForFirestore({ admins: INITIAL_ADMINS }))
           .then(() => setAdminUsersList(INITIAL_ADMINS))
-          .catch(err => console.error("Error seeding admins list:", err));
+          .catch(err => {
+            console.error("Error seeding admins list:", err);
+            if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+              setFirestoreQuotaExceeded(true);
+            }
+          });
       }
+    }, (error: any) => {
+      console.warn("admins_list onSnapshot error:", error);
+      if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
+      const INITIAL_ADMINS: AdminUser[] = [
+        {
+          id: 'admin_root',
+          username: 'admin',
+          passwordHash: 'admin',
+          fullName: 'Administrator Utama',
+          role: 'super_admin',
+          createdAt: Date.now()
+        }
+      ];
+      setAdminUsersList(prev => prev.length > 0 ? prev : INITIAL_ADMINS);
     });
 
     return () => unsubscribe();
@@ -129,8 +185,11 @@ export default function App() {
         statuses[doc.id] = doc.data();
       });
       setDisplayStatuses(statuses);
-    }, (error) => {
+    }, (error: any) => {
       console.error("Error fetching display statuses:", error);
+      if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -142,15 +201,18 @@ export default function App() {
     const sendHeartbeat = async () => {
       try {
         const statusRef = doc(db, 'display_status', displayId);
-        await setDoc(statusRef, {
+        await setDoc(statusRef, sanitizeForFirestore({
           displayId,
           lastSeen: Date.now(),
           status: 'online',
           userAgent: navigator.userAgent,
           currentLayoutId: state.currentLayoutId || 'default'
-        }, { merge: true });
-      } catch (err) {
+        }), { merge: true });
+      } catch (err: any) {
         console.error("Failed to send display heartbeat:", err);
+        if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+          setFirestoreQuotaExceeded(true);
+        }
       }
     };
 
@@ -167,35 +229,56 @@ export default function App() {
   useEffect(() => {
     const docRef = doc(db, 'signage_displays', activeSubscriptionId);
     
+    let isMounted = true;
     const unsubscribe = onSnapshot(docRef, async (snapshot) => {
+      if (!isMounted) return;
       if (snapshot.exists()) {
         const cloudState = snapshot.data() as SignageState;
         setState(cloudState);
         localStorage.setItem(`signage_state_${activeSubscriptionId}`, JSON.stringify(cloudState));
       } else {
-        // Document doesn't exist yet, seed it
+        // Document doesn't exist yet, seed it safely with a getDoc fallback
         try {
           if (activeSubscriptionId === 'global_state') {
-            // Backward compatibility lookup
             const oldRef = doc(db, 'signage', 'global_state');
-            onSnapshot(oldRef, (oldSnapshot) => {
-              if (oldSnapshot.exists()) {
-                const oldData = oldSnapshot.data() as SignageState;
-                setState(oldData);
-                setDoc(docRef, oldData);
-              } else {
-                setDoc(docRef, INITIAL_SIGNAGE_STATE);
-              }
-            });
+            const oldSnapshot = await getDoc(oldRef);
+            if (oldSnapshot.exists()) {
+              const oldData = oldSnapshot.data() as SignageState;
+              if (isMounted) setState(oldData);
+              await setDoc(docRef, sanitizeForFirestore(oldData));
+            } else {
+              if (isMounted) setState(INITIAL_SIGNAGE_STATE);
+              await setDoc(docRef, sanitizeForFirestore(INITIAL_SIGNAGE_STATE));
+            }
           } else {
-            await setDoc(docRef, INITIAL_SIGNAGE_STATE);
+            if (isMounted) setState(INITIAL_SIGNAGE_STATE);
+            await setDoc(docRef, sanitizeForFirestore(INITIAL_SIGNAGE_STATE));
           }
-        } catch (err) {
-          console.error("Error initializing display document:", err);
+        } catch (err: any) {
+          console.warn("Could not seed or fetch legacy display document, using initial/cached state:", err);
+          if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+            setFirestoreQuotaExceeded(true);
+          }
+          if (isMounted) {
+            const saved = localStorage.getItem(`signage_state_${activeSubscriptionId}`);
+            if (saved) {
+              try {
+                setState(JSON.parse(saved));
+              } catch (e) {
+                setState(INITIAL_SIGNAGE_STATE);
+              }
+            } else {
+              setState(INITIAL_SIGNAGE_STATE);
+            }
+          }
         }
       }
-    }, (error) => {
+    }, (error: any) => {
       console.warn(`Firestore display '${activeSubscriptionId}' failed, falling back to local storage:`, error);
+      if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota') || error?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
+      if (!isMounted) return;
       const saved = localStorage.getItem(`signage_state_${activeSubscriptionId}`);
       if (saved) {
         try {
@@ -208,7 +291,10 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [activeSubscriptionId]);
 
   // 4. State update propagation (Writes to Firestore for instant display updates)
@@ -218,14 +304,17 @@ export default function App() {
     
     try {
       const docRef = doc(db, 'signage_displays', activeSubscriptionId);
-      await setDoc(docRef, newState);
+      await setDoc(docRef, sanitizeForFirestore(newState));
       
       // Mirror to old global_state if needed to prevent breaking legacy systems
       if (activeSubscriptionId === 'global_state') {
-        await setDoc(doc(db, 'signage', 'global_state'), newState);
+        await setDoc(doc(db, 'signage', 'global_state'), sanitizeForFirestore(newState));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to sync updated state to Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -234,11 +323,14 @@ export default function App() {
     const updated = [...displaysList, newDisplay];
     setDisplaysList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
+      await setDoc(doc(db, 'signage', 'displays_list'), sanitizeForFirestore({ displays: updated }));
       // Initialize state for the new display
-      await setDoc(doc(db, 'signage_displays', newDisplay.id), INITIAL_SIGNAGE_STATE);
-    } catch (err) {
+      await setDoc(doc(db, 'signage_displays', newDisplay.id), sanitizeForFirestore(INITIAL_SIGNAGE_STATE));
+    } catch (err: any) {
       console.error("Failed to add display in Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -246,9 +338,12 @@ export default function App() {
     const updated = displaysList.map(d => d.id === updatedDisplay.id ? updatedDisplay : d);
     setDisplaysList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
-    } catch (err) {
+      await setDoc(doc(db, 'signage', 'displays_list'), sanitizeForFirestore({ displays: updated }));
+    } catch (err: any) {
       console.error("Failed to update display metadata in Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -257,13 +352,16 @@ export default function App() {
     const updated = displaysList.filter(d => d.id !== idToDelete);
     setDisplaysList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'displays_list'), { displays: updated });
+      await setDoc(doc(db, 'signage', 'displays_list'), sanitizeForFirestore({ displays: updated }));
       // If deleted was currently configured, fallback to default
       if (selectedDisplayId === idToDelete) {
         setSelectedDisplayId('global_state');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete display in Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -272,9 +370,12 @@ export default function App() {
     const updated = [...adminUsersList, newAdmin];
     setAdminUsersList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
-    } catch (err) {
+      await setDoc(doc(db, 'signage', 'admins_list'), sanitizeForFirestore({ admins: updated }));
+    } catch (err: any) {
       console.error("Failed to add admin user to Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -282,9 +383,12 @@ export default function App() {
     const updated = adminUsersList.map(u => u.id === updatedAdmin.id ? updatedAdmin : u);
     setAdminUsersList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
-    } catch (err) {
+      await setDoc(doc(db, 'signage', 'admins_list'), sanitizeForFirestore({ admins: updated }));
+    } catch (err: any) {
       console.error("Failed to update admin user in Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -293,9 +397,12 @@ export default function App() {
     const updated = adminUsersList.filter(u => u.id !== idToDelete);
     setAdminUsersList(updated);
     try {
-      await setDoc(doc(db, 'signage', 'admins_list'), { admins: updated });
-    } catch (err) {
+      await setDoc(doc(db, 'signage', 'admins_list'), sanitizeForFirestore({ admins: updated }));
+    } catch (err: any) {
       console.error("Failed to delete admin user in Firestore:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -306,32 +413,41 @@ export default function App() {
       const globalDocRef = doc(db, 'signage_displays', globalDocId);
       
       try {
-        await updateDoc(globalDocRef, {
+        await updateDoc(globalDocRef, sanitizeForFirestore({
           channels: channelsToSync,
           activeTVChannelId: activeTVChannelIdToSync
-        });
-      } catch (err) {
+        }));
+      } catch (err: any) {
         console.warn(`Could not updateDoc for global_state, attempting setDoc:`, err);
+        if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+          setFirestoreQuotaExceeded(true);
+        }
         try {
-          await setDoc(globalDocRef, {
+          await setDoc(globalDocRef, sanitizeForFirestore({
             ...INITIAL_SIGNAGE_STATE,
             channels: channelsToSync,
             activeTVChannelId: activeTVChannelIdToSync
-          });
-        } catch (setErr) {
+          }));
+        } catch (setErr: any) {
           console.error("Failed to sync global_state:", setErr);
+          if (setErr?.code === 'resource-exhausted' || setErr?.message?.includes('Quota') || setErr?.message?.includes('quota')) {
+            setFirestoreQuotaExceeded(true);
+          }
         }
       }
 
       // Also mirror to legacy path
       try {
-        await setDoc(doc(db, 'signage', 'global_state'), {
+        await setDoc(doc(db, 'signage', 'global_state'), sanitizeForFirestore({
           ...state,
           channels: channelsToSync,
           activeTVChannelId: activeTVChannelIdToSync
-        });
-      } catch (err) {
+        }));
+      } catch (err: any) {
         console.warn("Legacy path write failed:", err);
+        if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+          setFirestoreQuotaExceeded(true);
+        }
       }
 
       // 2. Sync other displays in displaysList
@@ -339,27 +455,36 @@ export default function App() {
         if (display.id === 'global_state') return;
         const targetDocRef = doc(db, 'signage_displays', display.id);
         try {
-          await updateDoc(targetDocRef, {
+          await updateDoc(targetDocRef, sanitizeForFirestore({
             channels: channelsToSync,
             activeTVChannelId: activeTVChannelIdToSync
-          });
-        } catch (err) {
+          }));
+        } catch (err: any) {
           console.warn(`Could not updateDoc for display ${display.id}, attempting setDoc:`, err);
+          if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+            setFirestoreQuotaExceeded(true);
+          }
           try {
-            await setDoc(targetDocRef, {
+            await setDoc(targetDocRef, sanitizeForFirestore({
               ...INITIAL_SIGNAGE_STATE,
               channels: channelsToSync,
               activeTVChannelId: activeTVChannelIdToSync
-            });
-          } catch (setErr) {
+            }));
+          } catch (setErr: any) {
             console.error(`Failed to sync display ${display.id}:`, setErr);
+            if (setErr?.code === 'resource-exhausted' || setErr?.message?.includes('Quota') || setErr?.message?.includes('quota')) {
+              setFirestoreQuotaExceeded(true);
+            }
           }
         }
       });
 
       await Promise.all(promises);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to broadcast channels to all displays:", err);
+      if (err?.code === 'resource-exhausted' || err?.message?.includes('Quota') || err?.message?.includes('quota')) {
+        setFirestoreQuotaExceeded(true);
+      }
     }
   };
 
@@ -398,7 +523,7 @@ export default function App() {
     const activeLayout = layoutsList.find((l) => l.id === state.currentLayoutId) || layoutsList[0];
     
     return (
-      <div className="w-screen h-screen overflow-hidden bg-black flex items-center justify-center">
+      <div className="w-screen h-screen overflow-hidden bg-black flex items-center justify-center relative">
         <div className="w-full h-full">
           <SignageDisplay 
             state={state} 
@@ -411,6 +536,21 @@ export default function App() {
             }}
           />
         </div>
+        {firestoreQuotaExceeded && (
+          <div className="fixed bottom-4 right-4 z-50 bg-amber-950/95 backdrop-blur-md border border-amber-500/40 text-amber-200 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 text-xs max-w-sm pointer-events-auto">
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+            <div className="flex-1">
+              <span className="font-bold block text-amber-300">Mode Lokal Aktif (Kuota Terlampaui)</span>
+              <span className="opacity-80">Firestore limit harian tercapai. Semua data disimpan secara lokal pada browser ini.</span>
+            </div>
+            <button 
+              onClick={() => setFirestoreQuotaExceeded(false)}
+              className="text-amber-400 hover:text-amber-200 font-bold px-1 py-0.5"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -436,23 +576,40 @@ export default function App() {
 
   // 8. Logged-in Administrator Dashboard Panel
   return (
-    <AdminDashboard 
-      state={state} 
-      onChange={handleStateChange}
-      displaysList={displaysList}
-      displayStatuses={displayStatuses}
-      selectedDisplayId={selectedDisplayId}
-      onSelectDisplay={setSelectedDisplayId}
-      onAddDisplay={handleAddDisplay}
-      onEditDisplay={handleEditDisplay}
-      onDeleteDisplay={handleDeleteDisplay}
-      onLogout={handleLogout}
-      adminUsers={adminUsersList}
-      currentUser={activeCurrentUser}
-      onAddAdmin={handleAddAdmin}
-      onEditAdmin={handleEditAdmin}
-      onDeleteAdmin={handleDeleteAdmin}
-      onSyncTVChannelsToAllDisplays={handleSyncTVChannelsToAllDisplays}
-    />
+    <div className="relative w-screen h-screen overflow-hidden">
+      <AdminDashboard 
+        state={state} 
+        onChange={handleStateChange}
+        displaysList={displaysList}
+        displayStatuses={displayStatuses}
+        selectedDisplayId={selectedDisplayId}
+        onSelectDisplay={setSelectedDisplayId}
+        onAddDisplay={handleAddDisplay}
+        onEditDisplay={handleEditDisplay}
+        onDeleteDisplay={handleDeleteDisplay}
+        onLogout={handleLogout}
+        adminUsers={adminUsersList}
+        currentUser={activeCurrentUser}
+        onAddAdmin={handleAddAdmin}
+        onEditAdmin={handleEditAdmin}
+        onDeleteAdmin={handleDeleteAdmin}
+        onSyncTVChannelsToAllDisplays={handleSyncTVChannelsToAllDisplays}
+      />
+      {firestoreQuotaExceeded && (
+        <div className="fixed bottom-4 right-4 z-50 bg-amber-950/95 backdrop-blur-md border border-amber-500/40 text-amber-200 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 text-xs max-w-sm pointer-events-auto">
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+          <div className="flex-1">
+            <span className="font-bold block text-amber-300">Mode Lokal Aktif (Kuota Terlampaui)</span>
+            <span className="opacity-80">Firestore limit harian tercapai. Semua data disimpan secara lokal pada browser ini.</span>
+          </div>
+          <button 
+            onClick={() => setFirestoreQuotaExceeded(false)}
+            className="text-amber-400 hover:text-amber-200 font-bold px-1 py-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

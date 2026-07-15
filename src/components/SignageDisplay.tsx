@@ -419,7 +419,7 @@ export default function SignageDisplay({
             console.warn("Unmuted HLS autoplay blocked, trying muted:", err);
             video.muted = true;
             setVideoMutedOverride(true);
-            video.play().catch(e => console.error("Muted HLS autoplay failed:", e));
+            video.play().catch(e => console.warn("Muted HLS autoplay failed or interrupted:", e));
           });
         });
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -447,7 +447,7 @@ export default function SignageDisplay({
           console.warn("Unmuted native HLS autoplay blocked, trying muted:", err);
           video.muted = true;
           setVideoMutedOverride(true);
-          video.play().catch(e => console.error("Native muted HLS autoplay failed:", e));
+          video.play().catch(e => console.warn("Native muted HLS autoplay failed or interrupted:", e));
         });
       } else {
         console.error("HLS is not supported on this browser.");
@@ -462,7 +462,7 @@ export default function SignageDisplay({
           console.warn("Unmuted standard autoplay blocked, trying muted:", err);
           video.muted = true;
           setVideoMutedOverride(true);
-          video.play().catch(e => console.error("Standard muted autoplay failed:", e));
+          video.play().catch(e => console.warn("Standard muted autoplay failed or interrupted:", e));
         });
       }
     }
