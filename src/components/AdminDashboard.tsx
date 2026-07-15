@@ -77,6 +77,7 @@ export default function AdminDashboard({
   const [pasteFeedback, setPasteFeedback] = useState(false);
   const [syncAllFeedback, setSyncAllFeedback] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [mainLinkCopied, setMainLinkCopied] = useState(false);
 
   // Form states for TV Channels CRUD
   const [showTVForm, setShowTVForm] = useState(false);
@@ -2472,6 +2473,59 @@ export default function AdminDashboard({
                   <p className="text-slate-400 text-xs mt-1">
                     Hubungkan dan sinkronkan beberapa display TV signage secara real-time. Setiap layar memiliki kontrol layout, promo, dan live feed masing-masing.
                   </p>
+                </div>
+
+                {/* Link Utama Kiosk TV Mode Banner */}
+                <div className="bg-gradient-to-r from-blue-950/40 to-indigo-950/40 border border-blue-500/15 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-xl">
+                  <div className="space-y-1.5 max-w-xl">
+                    <div className="flex items-center space-x-2">
+                      <Tv className="w-5 h-5 text-cyan-400 animate-pulse" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">🔗 Link Utama Kiosk TV Display Mode</h4>
+                    </div>
+                    <p className="text-slate-300 text-xs leading-relaxed font-light">
+                      Gunakan tautan utama di bawah untuk mengaktifkan mode siaran (TV Display/Kiosk Mode) pada monitor fisik Anda. Setelah dibuka, masukkan ID & nama layar beserta password untuk menghubungkannya.
+                    </p>
+                    <div className="bg-slate-950/90 border border-slate-850 rounded-xl px-3 py-2.5 flex items-center justify-between mt-2.5">
+                      <span className="font-mono text-cyan-400 text-xs break-all truncate mr-4">
+                        {typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}?mode=display` : '?mode=display'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-row md:flex-col gap-2 shrink-0 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const mainUrl = typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}?mode=display` : '';
+                        if (mainUrl) {
+                          navigator.clipboard.writeText(mainUrl);
+                          setMainLinkCopied(true);
+                          setTimeout(() => setMainLinkCopied(false), 2000);
+                        }
+                      }}
+                      className="flex items-center justify-center space-x-1.5 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 hover:text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md"
+                    >
+                      {mainLinkCopied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Salin Link</span>
+                        </>
+                      )}
+                    </button>
+                    <a
+                      href="?mode=display"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center space-x-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-lg shadow-indigo-600/10"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-white" />
+                      <span>Buka Kiosk</span>
+                    </a>
+                  </div>
                 </div>
 
                 {/* Form Tambah Layar Baru */}

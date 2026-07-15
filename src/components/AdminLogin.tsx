@@ -154,6 +154,20 @@ export default function AdminLogin({ onLoginSuccess, adminUsers = [] }: AdminLog
                 <span>Masuk Ke Panel Admin</span>
               )}
             </button>
+
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-800/60"></div>
+              <span className="flex-shrink mx-3 text-[10px] font-mono uppercase text-slate-500">atau hubungkan monitor</span>
+              <div className="flex-grow border-t border-slate-800/60"></div>
+            </div>
+
+            <a
+              href="?mode=display"
+              className="w-full bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-300 hover:text-white font-semibold text-xs py-3 rounded-xl transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md"
+            >
+              <Tv className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <span>Masuk Sebagai Monitor TV (Kiosk Mode)</span>
+            </a>
           </form>
 
           {/* Preset Credentials Help Bar */}

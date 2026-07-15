@@ -4,6 +4,7 @@ import { INITIAL_SIGNAGE_STATE } from './initialData';
 import AdminDashboard from './components/AdminDashboard';
 import SignageDisplay from './components/SignageDisplay';
 import AdminLogin from './components/AdminLogin';
+import DisplayLogin from './components/DisplayLogin';
 import { PRESET_LAYOUTS } from './initialData';
 import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
@@ -12,6 +13,7 @@ export default function App() {
   const [state, setState] = useState<SignageState>(INITIAL_SIGNAGE_STATE);
   const [isStandaloneDisplay, setIsStandaloneDisplay] = useState(false);
   const [displayId, setDisplayId] = useState('global_state');
+  const [isDisplayLoggedIn, setIsDisplayLoggedIn] = useState(false);
   
   // Admin selected display being configured
   const [selectedDisplayId, setSelectedDisplayId] = useState('global_state');
@@ -52,6 +54,14 @@ export default function App() {
       console.warn("Unable to access window.location.search safely inside iframe:", e);
     }
   }, []);
+
+  // 1b. Check if standalone display is authenticated
+  useEffect(() => {
+    if (isStandaloneDisplay) {
+      const savedAuth = localStorage.getItem(`display_logged_in_${displayId}`);
+      setIsDisplayLoggedIn(savedAuth === 'true');
+    }
+  }, [isStandaloneDisplay, displayId]);
 
   // 2. Subscribe to Available Displays List (Cross-device and persistent in Cloud Firestore)
   useEffect(() => {
@@ -328,13 +338,37 @@ export default function App() {
 
   // 6. Standalone TV Display Rendering Mode
   if (isStandaloneDisplay) {
+    if (!isDisplayLoggedIn) {
+      return (
+        <DisplayLogin
+          onLoginSuccess={(id) => {
+            localStorage.setItem(`display_logged_in_${id}`, 'true');
+            setDisplayId(id);
+            setSelectedDisplayId(id);
+            setIsDisplayLoggedIn(true);
+          }}
+          displaysList={displaysList}
+          adminUsers={adminUsersList}
+        />
+      );
+    }
+
     const layoutsList = state.layouts || PRESET_LAYOUTS;
     const activeLayout = layoutsList.find((l) => l.id === state.currentLayoutId) || layoutsList[0];
     
     return (
       <div className="w-screen h-screen overflow-hidden bg-black flex items-center justify-center">
         <div className="w-full h-full">
-          <SignageDisplay state={state} layout={activeLayout} previewMode={false} onChange={handleStateChange} />
+          <SignageDisplay 
+            state={state} 
+            layout={activeLayout} 
+            previewMode={false} 
+            onChange={handleStateChange} 
+            onLogoutDisplay={() => {
+              localStorage.removeItem(`display_logged_in_${displayId}`);
+              setIsDisplayLoggedIn(false);
+            }}
+          />
         </div>
       </div>
     );

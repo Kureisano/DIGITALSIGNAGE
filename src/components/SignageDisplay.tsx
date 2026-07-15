@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Hls from 'hls.js';
 import { SignageState, LayoutConfig, TVChannel, CCTVCamera, Promotion, LayoutMode } from '../types';
 import CCTVPlayer from './CCTVPlayer';
-import { Volume2, VolumeX, Radio, Shield, MonitorPlay, Calendar, Sparkles, TrendingUp, Compass, Flame, Leaf, Award, Tv, Smartphone, X, ChevronUp, ChevronDown, List, Hash, RefreshCw, Power, Plus, Minus } from 'lucide-react';
+import { Volume2, VolumeX, Radio, Shield, MonitorPlay, Calendar, Sparkles, TrendingUp, Compass, Flame, Leaf, Award, Tv, Smartphone, X, ChevronUp, ChevronDown, List, Hash, RefreshCw, Power, Plus, Minus, LogOut } from 'lucide-react';
 
 function getYouTubeId(url: string | undefined): string | null {
   if (!url) return null;
@@ -17,6 +17,7 @@ interface SignageDisplayProps {
   previewMode?: boolean; // If true, scales the font sizes and elements to fit preview containers gracefully
   customTimeOverride?: string; // e.g. for previewing schedules in real-time
   onChange?: (newState: SignageState) => void;
+  onLogoutDisplay?: () => void;
 }
 
 export default function SignageDisplay({
@@ -25,6 +26,7 @@ export default function SignageDisplay({
   previewMode = false,
   customTimeOverride,
   onChange,
+  onLogoutDisplay,
 }: SignageDisplayProps) {
   const { 
     promotions, 
@@ -1300,12 +1302,27 @@ export default function SignageDisplay({
               {/* Remote Header */}
               <div className="flex items-center justify-between pb-2 border-b border-slate-800/60 mb-3">
                 <span className="text-[8px] font-mono font-bold tracking-wider text-slate-500">SIGNAGE REMOTE</span>
-                <button 
-                  onClick={() => setIsRemoteOpen(false)}
-                  className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+                <div className="flex items-center space-x-1.5">
+                  {onLogoutDisplay && (
+                    <button 
+                      onClick={() => {
+                        if (window.confirm("Apakah Anda yakin ingin memutuskan monitor ini dari siaran dan keluar?")) {
+                          onLogoutDisplay();
+                        }
+                      }}
+                      className="p-1 text-slate-500 hover:text-red-400 rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
+                      title="Keluar / Disconnect Monitor"
+                    >
+                      <LogOut className="w-3 h-3" />
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setIsRemoteOpen(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
 
               {/* Row 1: Power, Mute & TV Guide */}
