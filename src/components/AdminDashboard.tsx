@@ -24,6 +24,7 @@ interface AdminDashboardProps {
   onAddAdmin?: (admin: AdminUser) => void;
   onEditAdmin?: (admin: AdminUser) => void;
   onDeleteAdmin?: (id: string) => void;
+  onSyncTVChannelsToAllDisplays?: (channels: TVChannel[], activeTVChannelId: string) => Promise<void>;
 }
 
 const PRESET_IMAGES = [
@@ -49,7 +50,8 @@ export default function AdminDashboard({
   currentUser = { id: 'admin_root', username: 'admin', passwordHash: 'admin', fullName: 'Administrator', role: 'super_admin', createdAt: Date.now() },
   onAddAdmin = () => {},
   onEditAdmin = () => {},
-  onDeleteAdmin = () => {}
+  onDeleteAdmin = () => {},
+  onSyncTVChannelsToAllDisplays
 }: AdminDashboardProps) {
   const { 
     currentLayoutId, 
@@ -69,6 +71,12 @@ export default function AdminDashboard({
 
   const channelsList = channels || PRESET_CHANNELS;
   const cctvsList = cctvs || PRESET_CCTVS;
+
+  // TV Sync and Copy-Paste local feedback states
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
+  const [pasteFeedback, setPasteFeedback] = useState(false);
+  const [syncAllFeedback, setSyncAllFeedback] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
 
   // Form states for TV Channels CRUD
   const [showTVForm, setShowTVForm] = useState(false);
@@ -1785,6 +1793,106 @@ export default function AdminDashboard({
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+
+                {/* TV SYNC & COPY-PASTE TOOLS PANEL */}
+                <div className="bg-slate-900/40 border border-indigo-500/10 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles className="w-4.5 h-4.5 text-indigo-400 animate-pulse" />
+                      <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">⚡ Fitur Sinkronisasi & Copy-Paste Siaran TV</h4>
+                    </div>
+                    <span className="text-[9px] bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono font-bold uppercase tracking-wider">
+                      Multi-Display Sync
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-xs leading-relaxed font-light">
+                    Salin seluruh daftar saluran TV ({channelsList.length} saluran) serta status siaran aktif dari layar saat ini (<span className="text-white font-semibold font-mono">{displaysList.find(d => d.id === selectedDisplayId)?.name || 'Layar Utama'}</span>) lalu tempel ke layar lain atau broadcast langsung ke semua display secara serentak.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          const configToCopy = {
+                            channels: channelsList,
+                            activeTVChannelId: activeTVChannelId
+                          };
+                          localStorage.setItem('copied_tv_config', JSON.stringify(configToCopy));
+                          setCopiedFeedback(true);
+                          setTimeout(() => setCopiedFeedback(false), 2000);
+                        } catch (e) {
+                          console.error("Failed to copy TV configuration", e);
+                        }
+                      }}
+                      className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-200 hover:text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-md"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{copiedFeedback ? 'Disalin! ✓' : 'Copy Konfigurasi TV'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          const saved = localStorage.getItem('copied_tv_config');
+                          if (saved) {
+                            const parsed = JSON.parse(saved);
+                            if (parsed && Array.isArray(parsed.channels)) {
+                              onChange({
+                                ...state,
+                                channels: parsed.channels,
+                                activeTVChannelId: parsed.activeTVChannelId || activeTVChannelId
+                              });
+                              setPasteFeedback(true);
+                              setTimeout(() => setPasteFeedback(false), 2000);
+                            }
+                          }
+                        } catch (e) {
+                          console.error("Failed to paste TV configuration", e);
+                        }
+                      }}
+                      disabled={!localStorage.getItem('copied_tv_config')}
+                      className={`flex items-center space-x-1.5 px-3.5 py-2 border text-xs font-semibold rounded-xl transition-all shadow-md cursor-pointer ${
+                        localStorage.getItem('copied_tv_config')
+                          ? 'bg-slate-950 hover:bg-slate-900 border-slate-800 text-slate-200 hover:text-white'
+                          : 'bg-slate-950/40 border-slate-900/60 text-slate-600 cursor-not-allowed'
+                      }`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${pasteFeedback ? 'animate-spin' : 'text-slate-500'}`} />
+                      <span>{pasteFeedback ? 'Berhasil Ditempel! ✓' : 'Paste ke Layar Ini'}</span>
+                    </button>
+
+                    {onSyncTVChannelsToAllDisplays && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.confirm(`Apakah Anda yakin ingin menduplikasi seluruh daftar saluran TV (${channelsList.length} saluran) dan siaran aktif saat ini ke SEMUA (${displaysList.length}) layar monitor signage yang terdaftar?`)) {
+                            setIsSyncingAll(true);
+                            try {
+                              await onSyncTVChannelsToAllDisplays(channelsList, activeTVChannelId);
+                              setSyncAllFeedback(true);
+                              setTimeout(() => setSyncAllFeedback(false), 3000);
+                            } catch (e) {
+                              alert("Gagal melakukan sinkronisasi: " + e);
+                            } finally {
+                              setIsSyncingAll(false);
+                            }
+                          }
+                        }}
+                        disabled={isSyncingAll}
+                        className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
+                      >
+                        {isSyncingAll ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                        ) : (
+                          <Tv className="w-3.5 h-3.5 text-white animate-pulse" />
+                        )}
+                        <span>{syncAllFeedback ? 'Selesai Sinkronisasi! ✓' : 'Terapkan ke Semua Layar (Broadcast)'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

@@ -5,7 +5,7 @@ import AdminDashboard from './components/AdminDashboard';
 import SignageDisplay from './components/SignageDisplay';
 import AdminLogin from './components/AdminLogin';
 import { PRESET_LAYOUTS } from './initialData';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 export default function App() {
@@ -248,6 +248,70 @@ export default function App() {
     }
   };
 
+  const handleSyncTVChannelsToAllDisplays = async (channelsToSync: any[], activeTVChannelIdToSync: string) => {
+    try {
+      // 1. Sync global_state
+      const globalDocId = 'global_state';
+      const globalDocRef = doc(db, 'signage_displays', globalDocId);
+      
+      try {
+        await updateDoc(globalDocRef, {
+          channels: channelsToSync,
+          activeTVChannelId: activeTVChannelIdToSync
+        });
+      } catch (err) {
+        console.warn(`Could not updateDoc for global_state, attempting setDoc:`, err);
+        try {
+          await setDoc(globalDocRef, {
+            ...INITIAL_SIGNAGE_STATE,
+            channels: channelsToSync,
+            activeTVChannelId: activeTVChannelIdToSync
+          });
+        } catch (setErr) {
+          console.error("Failed to sync global_state:", setErr);
+        }
+      }
+
+      // Also mirror to legacy path
+      try {
+        await setDoc(doc(db, 'signage', 'global_state'), {
+          ...state,
+          channels: channelsToSync,
+          activeTVChannelId: activeTVChannelIdToSync
+        });
+      } catch (err) {
+        console.warn("Legacy path write failed:", err);
+      }
+
+      // 2. Sync other displays in displaysList
+      const promises = displaysList.map(async (display) => {
+        if (display.id === 'global_state') return;
+        const targetDocRef = doc(db, 'signage_displays', display.id);
+        try {
+          await updateDoc(targetDocRef, {
+            channels: channelsToSync,
+            activeTVChannelId: activeTVChannelIdToSync
+          });
+        } catch (err) {
+          console.warn(`Could not updateDoc for display ${display.id}, attempting setDoc:`, err);
+          try {
+            await setDoc(targetDocRef, {
+              ...INITIAL_SIGNAGE_STATE,
+              channels: channelsToSync,
+              activeTVChannelId: activeTVChannelIdToSync
+            });
+          } catch (setErr) {
+            console.error(`Failed to sync display ${display.id}:`, setErr);
+          }
+        }
+      });
+
+      await Promise.all(promises);
+    } catch (err) {
+      console.error("Failed to broadcast channels to all displays:", err);
+    }
+  };
+
   const handleLoginSuccess = (username: string) => {
     localStorage.setItem('signage_admin_logged_in', 'true');
     localStorage.setItem('signage_admin_username', username);
@@ -312,6 +376,7 @@ export default function App() {
       onAddAdmin={handleAddAdmin}
       onEditAdmin={handleEditAdmin}
       onDeleteAdmin={handleDeleteAdmin}
+      onSyncTVChannelsToAllDisplays={handleSyncTVChannelsToAllDisplays}
     />
   );
 }
